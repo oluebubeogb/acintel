@@ -15,6 +15,8 @@ import { Activity } from './realtime';
 import { opaqueId } from './util';
 import { LGAS, normLga, pointIn } from './geo';
 import { StandaloneDataPort } from './dataport';
+import { assignAgents, syncTasks } from './tasks';
+import { actionLabel } from './rows';
 
 export const AGENCIES = [
   'FRSC', 'AVS', 'NIS', 'ARTSMA ADMIN', 'Military Navy/QRF', 'NDLEA', 'NPF-ABIA', 'ABIA DSS',
@@ -70,24 +72,34 @@ export class UsersOpsController {
 }
 
 /* ============================== AGENTS ============================== */
-type AgentBody = { name?: string; phone?: string; email?: string; nin?: string; lga?: string; groupId?: string | null; device?: string; status?: string };
+type AgentBody = { tag?: string; firstName?: string; lastName?: string; name?: string; phone?: string; email?: string; lga?: string; groupId?: string | null; status?: string };
+export const TAG_RE = /^[A-Za-z0-9][A-Za-z0-9\/\-]{2,39}$/;
+export const normTag = (v: unknown) => str(v, 40).toUpperCase().replace(/\s+/g, '');
+/** "Ngozi Ada Eze" → first "Ngozi", last "Ada Eze" (legacy single-name input). */
+export const splitName = (n: string) => { const t = n.trim().split(/\s+/); return { firstName: t[0] || '', lastName: t.slice(1).join(' ') }; };
 
 @Controller('agents')
 export class AgentsOpsController {
   constructor(private prisma: PrismaService, private act: Activity) {}
 
-  private async validate(b: AgentBody, partial = false) {
+  /** Device is read-only here: it syncs from the agent app on login. */
+  private async validate(b: AgentBody, partial = false, cur?: { firstName: string | null; lastName: string | null; name: string }) {
     const out: Record<string, unknown> = {};
-    if (!partial || b.name !== undefined) { const n = str(b.name, 120); if (n.length < 2) throw new BadRequestException('Full name is required'); out.name = n; }
+    if (b.name !== undefined && b.firstName === undefined && b.lastName === undefined) Object.assign(b, splitName(str(b.name, 120)));
+    if (!partial || b.tag !== undefined) { const t = normTag(b.tag); if (!TAG_RE.test(t)) throw new BadRequestException('Government Tag is required (3–40 letters, digits, / or -)'); out.tag = t; }
+    if (!partial || b.firstName !== undefined) { const n = str(b.firstName, 60); if (n.length < 2) throw new BadRequestException('First name is required'); out.firstName = n; }
+    if (!partial || b.lastName !== undefined) { const n = str(b.lastName, 60); if (n.length < 2) throw new BadRequestException('Last name is required'); out.lastName = n; }
+    if (out.firstName !== undefined || out.lastName !== undefined) {
+      const base = cur ? (cur.firstName != null || cur.lastName != null ? { firstName: cur.firstName || '', lastName: cur.lastName || '' } : splitName(cur.name)) : { firstName: '', lastName: '' };
+      out.name = `${out.firstName ?? base.firstName} ${out.lastName ?? base.lastName}`.trim();
+    }
     if (!partial || b.phone !== undefined) { const p = normPhone(b.phone); if (!p) throw new BadRequestException('Phone must be a valid Nigerian number, e.g. 0803 123 4567'); out.phone = p; }
-    if (b.email !== undefined && b.email !== '') { if (!EMAIL_RE.test(str(b.email))) throw new BadRequestException('Email looks invalid'); out.email = str(b.email).toLowerCase(); }
-    if (b.nin !== undefined && b.nin !== '') { if (!/^\d{11}$/.test(str(b.nin))) throw new BadRequestException('NIN must be 11 digits'); out.nin = str(b.nin); }
+    if (!partial || b.email !== undefined) { const e = str(b.email).toLowerCase(); if (!EMAIL_RE.test(e)) throw new BadRequestException('A valid email is required'); out.email = e; }
     if (!partial || b.lga !== undefined) { const l = normLga(b.lga); if (!l) throw new BadRequestException(`LGA must be one of: ${LGAS.join(', ')}`); out.lga = l; }
     if (b.groupId !== undefined) {
       if (!b.groupId) out.groupId = null;
       else { const g = await this.prisma.homelandGroup.findUnique({ where: { publicId: b.groupId } }); if (!g) throw new BadRequestException('Unknown group'); out.groupId = g.id; }
     }
-    if (b.device !== undefined) out.device = str(b.device, 120) || null;
     if (b.status !== undefined) { if (!['active', 'suspended'].includes(b.status)) throw new BadRequestException('Bad status'); out.status = b.status; }
     return out;
   }
@@ -96,6 +108,7 @@ export class AgentsOpsController {
   async create(@Body() b: AgentBody, @CurrentAdmin() admin: AdminCtx) {
     const data = await this.validate(b);
     if (await this.prisma.agent.findFirst({ where: { phone: data.phone as string } })) throw new ConflictException('An agent with this phone already exists');
+    if (await this.prisma.agent.findFirst({ where: { tag: data.tag as string } })) throw new ConflictException('An agent with this Government Tag already exists');
     const [lat, lng] = pointIn(data.lga as string);
     const a = await this.prisma.agent.create({ data: { publicId: opaqueId(), status: 'active', lat, lng, ...(data as any) }, include: { group: true } });
     await this.act.audit(admin, 'agent.create', 'agent', a.publicId, `Added agent ${a.name} (${a.lga}${a.group ? ' · ' + a.group.name : ' · un-assigned'})`, undefined, { name: a.name, phone: a.phone });
@@ -108,7 +121,8 @@ export class AgentsOpsController {
   async update(@Param('id') id: string, @Body() b: AgentBody, @CurrentAdmin() admin: AdminCtx) {
     const a = await this.prisma.agent.findUnique({ where: { publicId: id } });
     if (!a) throw new NotFoundException();
-    const data = await this.validate(b, true);
+    const data = await this.validate(b, true, a);
+    if (data.tag && data.tag !== a.tag && (await this.prisma.agent.findFirst({ where: { tag: data.tag as string } }))) throw new ConflictException('Government Tag already used by another agent');
     if (data.phone && data.phone !== a.phone && (await this.prisma.agent.findFirst({ where: { phone: data.phone as string } }))) throw new ConflictException('Phone already used by another agent');
     if (data.lga && data.lga !== a.lga) { const [lat, lng] = pointIn(data.lga as string); Object.assign(data, { lat, lng }); }
     await this.prisma.agent.update({ where: { id: a.id }, data: data as any });
@@ -353,12 +367,14 @@ export class IncidentsController {
       if (!upd.count) throw new ConflictException('Report changed while you were dispatching — refresh');
       return tx.dispatch.create({ data: { incidentId: inc.id, agencies, byAdmin: admin.email, note } });
     });
+    const assigned = await assignAgents(this.prisma as any, inc, admin.email).catch((e) => { console.warn('[dispatch] agent assignment failed', e?.message); return 0; });
+    if (assigned) this.act.changed(['agents']);
     await this.act.audit(admin, 'incident.dispatch', 'incident', inc.publicId, `Dispatched ${inc.category} (${inc.lga}) to ${agencies.join(', ')}`, { status: inc.status }, { status: 'dispatched', agencies });
     await this.prisma.notification.updateMany({ where: { href: `/e/${inc.publicId}`, target: 'reports.new', readAt: null }, data: { readAt: new Date() } });
     await this.act.notify('reports.dispatched', 'dispatch', `${inc.category} dispatched to ${agencies.length} agenc${agencies.length > 1 ? 'ies' : 'y'}`, agencies.join(', '), `/e/${inc.publicId}`);
     this.act.changed(['reports'], inc.publicId);
     await dataport.pushDispatch(inc.legacyId || inc.publicId, agencies); // no-op until Phase 7
-    return { ok: true, dispatchId: d.id, agencies, status: 'dispatched' };
+    return { ok: true, dispatchId: d.id, agencies, status: 'dispatched', agentsAssigned: assigned };
   }
 
   /** acted | resolved | fake. body: { status, note } */
@@ -383,6 +399,7 @@ export class IncidentsController {
       if (status === 'resolved' || status === 'fake') { data.resolvedAt = new Date(); data.resolvedBy = admin.email; }
       const r = await this.prisma.incident.updateMany({ where: { id: i.id, status: i.status }, data });
       if (!r.count) { skipped.push(i.publicId); continue; }
+      await syncTasks(this.prisma as any, i.id, status);
       const verb = status === 'fake' ? 'Marked fake' : status === 'acted' ? 'Marked acted upon' : 'Resolved';
       undo.push((await this.act.audit(admin, `incident.${status}`, 'incident', i.publicId, `${verb}: ${i.category} (${i.lga})${note ? ' — ' + note : ''}`, { status: i.status, actedAt: i.actedAt, resolvedAt: i.resolvedAt, resolvedBy: i.resolvedBy, note: i.note }, { status })).id);
       await this.act.clearFor(i.publicId);
@@ -531,7 +548,7 @@ export class AuditController {
   constructor(private prisma: PrismaService, private act: Activity) {}
 
   @Get('actions') @RequirePerm('audit.view')
-  async actions() { return (await this.prisma.auditLog.groupBy({ by: ['action'], _count: true, orderBy: { action: 'asc' } })).map((a) => ({ action: a.action, count: a._count })); }
+  async actions() { return (await this.prisma.auditLog.groupBy({ by: ['action'], _count: true, orderBy: { action: 'asc' } })).map((a) => ({ action: a.action, label: actionLabel(a.action), count: a._count })); }
 
   /** body: { ids: auditLogId[] } — restores the "before" snapshot for whitelisted actions (only if nothing changed since). */
   @Post('undo') @HttpCode(200) @RequirePerm('ops')
@@ -570,7 +587,7 @@ export function parseCsv(text: string): string[][] {
 }
 const TEMPLATES: Record<string, string[]> = {
   users: ['name', 'phone', 'email', 'lga', 'status', 'device'],
-  agents: ['name', 'phone', 'email', 'nin', 'lga', 'group', 'device'],
+  agents: ['tag', 'firstName', 'lastName', 'phone', 'email', 'lga', 'group'],
   groups: ['name', 'description', 'lga'],
   categories: ['name', 'description', 'riskLevel', 'sendAgentCount'],
 };
@@ -581,7 +598,7 @@ export class ImportController {
   @Get(':kind/template')
   template(@Param('kind') kind: string, @Res() res: Response) {
     const cols = TEMPLATES[kind]; if (!cols) throw new NotFoundException('Import supports users, agents, groups, categories');
-    const sample: Record<string, string> = { users: 'Chidi Okeke,08031234567,chidi@example.com,Umuahia North,active,Android 14 · TECNO KI5', agents: 'Ngozi Eze,08035550001,,12345678901,Aba South,ARTSMA,Android 13 · itel A70', groups: 'ARTSMA,Abia Road Traffic,Umuahia North', categories: 'Kidnapping,Abduction reports,critical,6' };
+    const sample: Record<string, string> = { users: 'Chidi Okeke,08031234567,chidi@example.com,Umuahia North,active,Android 14 · TECNO KI5', agents: 'ABHS/AGT/0001,Ngozi,Eze,08035550001,ngozi.eze@example.com,Aba South,ARTSMA', groups: 'ARTSMA,Abia Road Traffic,Umuahia North', categories: 'Kidnapping,Abduction reports,critical,6' };
     res.setHeader('Content-Type', 'text/csv'); res.setHeader('Content-Disposition', `attachment; filename="acintel-${kind}-template.csv"`);
     res.send(cols.join(',') + '\n' + sample[kind] + '\n');
   }
@@ -596,7 +613,9 @@ export class ImportController {
     const header = rows[0].map((h) => h.trim().toLowerCase().replace(/[\s_]/g, ''));
     const want = TEMPLATES[kind].map((c) => c.toLowerCase());
     const idx = Object.fromEntries(want.map((c) => [c, header.indexOf(c)]));
-    if (idx.name < 0) throw new BadRequestException(`Header must include: ${TEMPLATES[kind].join(', ')}`);
+    if (kind === 'agents') idx.name = idx.firstname >= 0 && idx.lastname >= 0 ? -2 : header.indexOf('name'); // firstName/lastName (legacy: name)
+    if (kind === 'agents' && idx.tag < 0 && header.includes('nin')) idx.tag = header.indexOf('nin');
+    if (idx.name === -1 || idx.name === undefined) throw new BadRequestException(`Header must include: ${TEMPLATES[kind].join(', ')}`);
     const get = (r: string[], c: string) => (idx[c.toLowerCase()] >= 0 ? (r[idx[c.toLowerCase()]] || '').trim() : '');
     const report: { row: number; ok: boolean; action?: string; error?: string; name?: string }[] = [];
     const dry = b.dryRun !== false;
@@ -605,7 +624,8 @@ export class ImportController {
     const toCreateGroups = new Set<string>();
     let created = 0;
     for (let i = 1; i < rows.length && i <= 10000; i++) {
-      const r = rows[i]; const name = get(r, 'name'); const line = i + 1;
+      const r = rows[i]; const line = i + 1;
+      const name = kind === 'agents' && idx.name === -2 ? `${get(r, 'firstName')} ${get(r, 'lastName')}`.trim() : get(r, 'name');
       try {
         if (name.length < 2) throw new Error('name missing');
         if (kind === 'users' || kind === 'agents') {
@@ -619,14 +639,18 @@ export class ImportController {
             if (!dry) { await this.prisma.user.create({ data: { publicId: opaqueId(), name, phone, email: email || null, lga, status, device: get(r, 'device') || null, approvedAt: status === 'active' ? new Date() : null } }); created++; }
           } else {
             if (await this.prisma.agent.findFirst({ where: { phone } })) throw new Error('agent phone already exists');
-            const nin = get(r, 'nin'); if (nin && !/^\d{11}$/.test(nin)) throw new Error('NIN must be 11 digits');
+            const nm = idx.name === -2 ? { firstName: get(r, 'firstName'), lastName: get(r, 'lastName') } : splitName(name);
+            if (nm.firstName.length < 2 || nm.lastName.length < 2) throw new Error('firstName and lastName are required');
+            if (!email) throw new Error('email is required');
+            const tag = normTag(get(r, 'tag')); if (!TAG_RE.test(tag)) throw new Error('Government Tag missing or invalid');
+            if (seen.has('tag:' + tag) || (await this.prisma.agent.findFirst({ where: { tag } }))) throw new Error('Government Tag already exists'); seen.add('tag:' + tag);
             const gname = get(r, 'group'); let groupId: string | null = null;
             if (gname && !/^un-?assigned$/i.test(gname)) {
               let g = groups.get(gname.toLowerCase());
               if (!g && !dry) { g = await this.prisma.homelandGroup.create({ data: { publicId: opaqueId(), name: gname } }); groups.set(gname.toLowerCase(), g); }
               if (!g) toCreateGroups.add(gname); else groupId = g.id;
             }
-            if (!dry) { const [lat, lng] = pointIn(lga); await this.prisma.agent.create({ data: { publicId: opaqueId(), name, phone, email: email || null, nin: nin || null, lga, groupId, device: get(r, 'device') || null, status: 'active', lat, lng } }); created++; }
+            if (!dry) { const [lat, lng] = pointIn(lga); await this.prisma.agent.create({ data: { publicId: opaqueId(), name, ...nm, phone, email: email.toLowerCase(), tag, lga, groupId, status: 'active', lat, lng } }); created++; }
           }
         } else if (kind === 'groups') {
           if (seen.has(name.toLowerCase()) || groups.has(name.toLowerCase())) throw new Error('group already exists'); seen.add(name.toLowerCase());

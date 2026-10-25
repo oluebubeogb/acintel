@@ -4,6 +4,7 @@
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { opaqueId } from './util';
+import { assignAgents } from './tasks';
 import { LGAS, normLga, pointIn } from './geo';
 
 const prisma = new PrismaClient();
@@ -59,6 +60,27 @@ async function ensureBackfill() {
   await prisma.user.updateMany({ where: { status: { in: ['active', 'suspended'] }, approvedAt: null }, data: { approvedAt: new Date() } });
   await prisma.$executeRawUnsafe(`UPDATE "Incident" SET "resolvedAt" = "createdAt" + interval '1 hour' * (6 + random()*40) WHERE "status" IN ('resolved','fake') AND "resolvedAt" IS NULL`);
   await prisma.$executeRawUnsafe(`UPDATE "Device" SET "os" = split_part("label", ' · ', 1) WHERE "os" IS NULL`);
+  // UI polish: first/last names for every agent; demo-only Government Tags, emails and incident assignments.
+  await prisma.$executeRawUnsafe(`UPDATE "Agent" SET "firstName" = split_part(btrim("name"), ' ', 1), "lastName" = NULLIF(btrim(substr(btrim("name"), length(split_part(btrim("name"), ' ', 1)) + 1)), '') WHERE "firstName" IS NULL`);
+  if (process.env.SEED_DEMO === 'false') return;
+  const noTag = await prisma.agent.findMany({ where: { OR: [{ tag: null }, { email: null }] }, orderBy: { createdAt: 'asc' } });
+  let n = 5001 + (await prisma.agent.count({ where: { tag: { not: null } } }));
+  for (const a of noTag) {
+    await prisma.agent.update({ where: { id: a.id }, data: { ...(a.tag ? {} : { tag: `ABHS/AGT/${n++}` }), ...(a.email ? {} : { email: `${a.name.toLowerCase().replace(/[^a-z]+/g, '.')}.${a.publicId.slice(0, 4).toLowerCase()}@homeland.abia.gov.ng` }) } });
+  }
+  if (!(await prisma.agentTask.count())) {
+    const incs = await prisma.incident.findMany({ where: { status: { in: ['dispatched', 'acted', 'resolved'] } } });
+    for (const i of incs) {
+      const at = new Date(i.createdAt.getTime() + (5 + rnd() * 40) * 60000);
+      await assignAgents(prisma, i, 'seed', at);
+      if (i.status === 'dispatched') continue;
+      for (const t of await prisma.agentTask.findMany({ where: { incidentId: i.id } })) {
+        const resp = new Date(at.getTime() + (10 + rnd() * 150) * 60000);
+        const declined = rnd() < 0.08;
+        await prisma.agentTask.update({ where: { id: t.id }, data: declined ? { status: 'declined' } : i.status === 'acted' ? { status: 'responded', respondedAt: resp } : { status: 'completed', respondedAt: resp, completedAt: i.resolvedAt || resp } });
+      }
+    }
+  }
 }
 
 async function demo(email: string, passwordHash: string) {
@@ -76,7 +98,8 @@ async function demo(email: string, passwordHash: string) {
   const agents = [];
   for (let i = 0; i < 124; i++) {
     const lga = pick(LGAS); const [lat, lng] = pointIn(lga, rnd); const g = rnd() < 0.85 ? pick(groups) : null;
-    agents.push({ publicId: opaqueId(), name: name(), phone: phone(), lga, groupId: g?.id ?? null, status: i < 12 ? 'suspended' : 'active', createdAt: ago(90), lat, lng, device: pick(DEVICES), lastSeenAt: rnd() < 0.35 ? new Date(Date.now() - rnd() * 600000) : ago(3) });
+    const fn = pick(FIRST), ln = pick(LAST);
+    agents.push({ publicId: opaqueId(), name: `${fn} ${ln}`, firstName: fn, lastName: ln, tag: `ABHS/AGT/${String(1001 + i).padStart(4, '0')}`, email: `${fn}.${ln}.${i}@homeland.abia.gov.ng`.toLowerCase(), phone: phone(), lga, groupId: g?.id ?? null, status: i < 12 ? 'suspended' : 'active', createdAt: ago(90), lat, lng, device: pick(DEVICES), lastSeenAt: rnd() < 0.35 ? new Date(Date.now() - rnd() * 600000) : ago(3) });
   }
   await prisma.agent.createMany({ data: agents });
   const allUsers = await prisma.user.findMany({ select: { id: true, name: true, phone: true, lga: true } });
@@ -108,7 +131,7 @@ async function demo(email: string, passwordHash: string) {
   await prisma.notification.createMany({ data: [
     ...newInc.map((i) => ({ target: 'reports.new', kind: 'report', title: `New report — ${i.category}`, body: i.lga, href: `/e/${i.publicId}` })),
     ...pend.map((u) => ({ target: 'users.pending', kind: 'signup', title: `New user signup — ${u.name}`, body: u.lga, href: `/e/${u.publicId}` })),
-    ...nAlarms.map((a) => ({ target: `alarms.${a.type}`, kind: 'alarm', title: `${a.type === 'panic' ? 'Panic' : 'Duress'} alarm — ${a.sender}`, body: a.location, href: `/e/${a.publicId}` })),
+    ...nAlarms.map((a) => ({ target: 'alarms.new', kind: 'alarm', title: `${a.type === 'panic' ? 'Panic' : 'Duress'} alarm — ${a.sender}`, body: a.location, href: `/e/${a.publicId}` })),
     { target: 'agents.unassigned', kind: 'agent', title: `${unassigned} agents awaiting group assignment`, body: 'Agents', href: '/agents/unassigned' },
   ] });
   console.log(`Seed: demo data — ${users.length} users, ${agents.length} agents, ${incidents.length} incidents, ${alarms.length} alarms.`);
@@ -119,7 +142,7 @@ async function main() {
   const password = process.env.SEED_ADMIN_PASSWORD || 'Passw0rd!23';
   const passwordHash = await bcrypt.hash(password, 10);
   if (process.env.SEED_RESET === 'true') {
-    await prisma.$transaction([prisma.incidentMedia.deleteMany(), prisma.dispatch.deleteMany(), prisma.incident.deleteMany(), prisma.alarm.deleteMany(), prisma.user.deleteMany(), prisma.agent.deleteMany(), prisma.notification.deleteMany(), prisma.securityAlert.deleteMany()]);
+    await prisma.$transaction([prisma.agentTask.deleteMany(), prisma.incidentMedia.deleteMany(), prisma.dispatch.deleteMany(), prisma.incident.deleteMany(), prisma.alarm.deleteMany(), prisma.user.deleteMany(), prisma.agent.deleteMany(), prisma.notification.deleteMany(), prisma.securityAlert.deleteMany()]);
   }
   await ensureReference(email, passwordHash);
   if (process.env.SEED_DEMO !== 'false' && !(await prisma.user.count())) await demo(email, passwordHash);

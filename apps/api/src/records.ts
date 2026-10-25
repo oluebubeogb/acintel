@@ -11,6 +11,18 @@ export { fmt } from './lagos';
 
 type Q = Record<string, string | undefined>;
 const ACTIVE_INC = ['new', 'dispatched', 'acted'];
+const TASK_FILTER: Record<string, string[] | null> = { all: null, assigned: ['assigned'], responded: ['responded', 'completed'], open: ['assigned', 'responded'], completed: ['completed'] };
+const TASK_LABEL: Record<string, string> = { assigned: 'Assigned', responded: 'Responded', completed: 'Completed', declined: 'Declined' };
+const TASK_COLS = [{ key: 'category', label: 'Category' }, { key: 'location', label: 'Location' }, { key: 'lga', label: 'LGA' }, { key: 'task', label: 'Agent Status' }, { key: 'status', label: 'Report Status' }, { key: 'assigned', label: 'Assigned' }, { key: 'responded', label: 'Responded' }];
+const taskRow = (t: any) => ({ ...incidentRow(t.incident), task: TASK_LABEL[t.status] || t.status, assigned: fmt(t.createdAt), responded: fmt(t.respondedAt), _ts: t.createdAt });
+type Stat = { label: string; value: string | number; accent: string; icon: string; tip: string; drill?: { kind: string; query?: Record<string, string>; title: string; href?: string } };
+/** 30 Lagos days ending today, zero-filled. */
+const thirtyDays = <T extends object>(init: () => T) => {
+  const since = lagosDayStart(dayKey(new Date(Date.now() - 29 * 86400000)));
+  const days: ({ day: string; label: string } & T)[] = [];
+  for (let k = 0; k < 30; k++) { const d = new Date(since.getTime() + k * 86400000 + 3600000); days.push({ day: dayKey(d), label: dayLabel(d), ...init() }); }
+  return { days, idx: new Map(days.map((d, i) => [d.day, i])) };
+};
 
 @Controller()
 export class RecordsController {
@@ -42,7 +54,7 @@ export class RecordsController {
       return { columns: AGENT_COLS, total, rows: rows.map(agentRow) };
     };
     const incidents = async (status: string[] | null) => {
-      const where: Prisma.IncidentWhereInput = { ...common, ...(status ? { status: { in: status } } : q.status && q.status !== 'All' ? { status: q.status } : {}), ...(q.category && q.category !== 'All' ? { category: q.category } : {}) };
+      const where: Prisma.IncidentWhereInput = { ...common, ...(status ? { status: { in: status } } : q.status && q.status !== 'All' ? { status: { in: q.status.split(',') } } : {}), ...(q.category && q.category !== 'All' ? { category: q.category } : {}), ...(q.dispatched === '1' ? { dispatches: { some: {} } } : {}) };
       const [rows, total] = await Promise.all([p.incident.findMany({ where, take, orderBy: { createdAt: 'desc' }, include: { reporter: true } }), p.incident.count({ where })]);
       return { columns: INC_COLS, total, rows: rows.map(incidentRow) };
     };
@@ -91,9 +103,27 @@ export class RecordsController {
         return { columns: CAT_COLS, total: cs.length, rows: cs.map(categoryRow) };
       }
       case 'alarms.new': return alarms({ status: 'new' });
-      case 'alarms.duress': return alarms({ type: 'duress', ...(q.status ? { status: q.status } : {}) });
-      case 'alarms.panic': return alarms({ type: 'panic', ...(q.status ? { status: q.status } : {}) });
-      case 'alarms.all': return alarms({});
+      // Duress/Panic lists are the handled history — brand-new alarms live under Alarms → New.
+      case 'alarms.duress': case 'alarms.panic': return alarms({ type: kind.slice(7), status: q.status && q.status !== 'All' && q.status !== 'new' ? q.status : { not: 'new' } });
+      case 'alarms.all': return alarms({ ...(q.type ? { type: q.type } : {}), ...(q.status && q.status !== 'All' ? { status: q.status } : {}) });
+      case 'agent.incidents': {
+        const ag = q.agent ? await p.agent.findUnique({ where: { publicId: q.agent } }) : null;
+        if (!ag) throw new NotFoundException('Unknown agent');
+        const st = TASK_FILTER[q.state || 'all'];
+        const where: Prisma.AgentTaskWhereInput = { agentId: ag.id, ...(st ? { status: { in: st } } : {}), ...(created ? { createdAt: created } : {}) };
+        const [ts, total] = await Promise.all([p.agentTask.findMany({ where, take, orderBy: { createdAt: 'desc' }, include: { incident: { include: { reporter: true } } } }), p.agentTask.count({ where })]);
+        return { columns: TASK_COLS, total, rows: ts.map(taskRow) };
+      }
+      case 'user.incidents': case 'user.alarms': {
+        const u = q.user ? await p.user.findUnique({ where: { publicId: q.user } }) : null;
+        if (!u) throw new NotFoundException('Unknown user');
+        if (kind === 'user.incidents') {
+          const where: Prisma.IncidentWhereInput = { reporterId: u.id, ...(q.status && q.status !== 'All' ? { status: { in: q.status.split(',') } } : {}) };
+          const [rows, total] = await Promise.all([p.incident.findMany({ where, take, orderBy: { createdAt: 'desc' }, include: { reporter: true } }), p.incident.count({ where })]);
+          return { columns: INC_COLS.filter((c) => c.key !== 'reporter'), total, rows: rows.map(incidentRow) };
+        }
+        return alarms({ userId: u.id, ...(q.type ? { type: q.type } : {}) });
+      }
       case 'tips.alerts': case 'tips.send': {
         const where = created ? { createdAt: created } : {};
         const [rows, total] = await Promise.all([p.securityAlert.findMany({ where, take, orderBy: { createdAt: 'desc' } }), p.securityAlert.count({ where })]);
@@ -118,79 +148,98 @@ export class RecordsController {
     const u = await p.user.findUnique({ where: { publicId: id }, include: { incidents: { orderBy: { createdAt: 'desc' }, include: { reporter: true } }, alarms: { orderBy: { createdAt: 'desc' } } } });
     if (u) {
       // 30-day engagement strip (reports + alarms per Lagos day) — click a day for the full picture.
-      const since = lagosDayStart(dayKey(new Date(Date.now() - 29 * 86400000)));
-      const days: { day: string; label: string; reports: number; alarms: number }[] = [];
-      for (let k = 0; k < 30; k++) { const d = new Date(since.getTime() + k * 86400000 + 3600000); days.push({ day: dayKey(d), label: dayLabel(d), reports: 0, alarms: 0 }); }
-      const idx = new Map(days.map((d, i) => [d.day, i]));
+      const { days, idx } = thirtyDays(() => ({ reports: 0, alarms: 0 }));
       u.incidents.forEach((i) => { const k = idx.get(dayKey(i.createdAt)); if (k !== undefined) days[k].reports++; });
       u.alarms.forEach((a) => { const k = idx.get(dayKey(a.createdAt)); if (k !== undefined) days[k].alarms++; });
       return { type: 'user', tag: 'Users', title: u.name, subtitle: `${u.lga} · ${u.status}`, status: u.status,
-        fields: { Phone: u.phone, Email: u.email || '—', LGA: u.lga, Status: u.status, Device: u.device || '—', 'Reg date': fmt(u.createdAt), 'Last login': fmt(u.lastLogin), Approved: fmt(u.approvedAt), Incidents: String(u.incidents.length), Alarms: String(u.alarms.length) },
+        fields: { Phone: u.phone, Email: u.email || '—', LGA: u.lga, Status: u.status, Device: u.device || '—', 'Reg Date': fmt(u.createdAt), 'Last Login': fmt(u.lastLogin), Approved: fmt(u.approvedAt), Incidents: String(u.incidents.length), Alarms: String(u.alarms.length) },
         links: { Device: u.device && devIds.get(u.device) ? `/e/${devIds.get(u.device)}` : undefined, LGA: `/users/generate?lga=${encodeURIComponent(u.lga)}` },
-        dates: { 'Reg date': u.createdAt, 'Last login': u.lastLogin, Approved: u.approvedAt },
-        activity: days, raw: { status: u.status, lga: u.lga },
+        dates: { 'Reg Date': u.createdAt, 'Last Login': u.lastLogin, Approved: u.approvedAt },
+        activity: days, activityKeys: [{ key: 'reports', label: 'reports' }, { key: 'alarms', label: 'alarms' }], raw: { status: u.status, lga: u.lga },
+        stats: [
+          { label: 'Reports Filed', value: u.incidents.length, accent: '#2563eb', icon: 'doc', tip: 'Every security report this user has filed', drill: { kind: 'user.incidents', query: { user: u.publicId }, title: `Reports by ${u.name}` } },
+          { label: 'Open Reports', value: u.incidents.filter((i) => ACTIVE_INC.includes(i.status)).length, accent: '#f59e0b', icon: 'pending', tip: 'Reports still new, dispatched or being acted upon', drill: { kind: 'user.incidents', query: { user: u.publicId, status: ACTIVE_INC.join(',') }, title: `Open reports by ${u.name}` } },
+          { label: 'Resolved', value: u.incidents.filter((i) => i.status === 'resolved').length, accent: '#10b981', icon: 'seal', tip: 'Reports closed as resolved', drill: { kind: 'user.incidents', query: { user: u.publicId, status: 'resolved' }, title: `Resolved reports by ${u.name}` } },
+          { label: 'Alarms Raised', value: u.alarms.length, accent: '#e11d48', icon: 'siren', tip: 'Panic and duress alarms from this user', drill: { kind: 'user.alarms', query: { user: u.publicId }, title: `Alarms raised by ${u.name}` } },
+        ] as Stat[],
         related: [
-          { title: 'Incidents reported', columns: INC_COLS.filter((c) => c.key !== 'reporter'), rows: u.incidents.map(incidentRow), linkKey: 'category' },
-          { title: 'Alarms raised', columns: ALARM_COLS.filter((c) => c.key !== 'sender'), rows: u.alarms.map((a) => alarmRow(a)), linkKey: 'type' },
+          { title: 'Incidents Reported', columns: INC_COLS.filter((c) => c.key !== 'reporter'), rows: u.incidents.map(incidentRow), linkKey: 'category' },
+          { title: 'Alarms Raised', columns: ALARM_COLS.filter((c) => c.key !== 'sender'), rows: u.alarms.map((a) => alarmRow(a)), linkKey: 'type' },
         ], timeline: await timeline() };
     }
-    const a = await p.agent.findUnique({ where: { publicId: id }, include: { group: true } });
+    const a = await p.agent.findUnique({ where: { publicId: id }, include: { group: true, tasks: { orderBy: { createdAt: 'desc' }, include: { incident: { include: { reporter: true } } } } } });
     if (a) {
-      const sameDevice = a.device ? await p.user.findMany({ where: { device: a.device }, take: 50 }) : [];
+      const { days, idx } = thirtyDays(() => ({ assigned: 0, responded: 0 }));
+      a.tasks.forEach((t) => {
+        const k = idx.get(dayKey(t.createdAt)); if (k !== undefined) days[k].assigned++;
+        const r = t.respondedAt ? idx.get(dayKey(t.respondedAt)) : undefined; if (r !== undefined) days[r].responded++;
+      });
+      const responded = a.tasks.filter((t) => t.status === 'responded' || t.status === 'completed');
+      const open = a.tasks.filter((t) => t.status === 'assigned' || t.status === 'responded');
+      const rt = responded.filter((t) => t.respondedAt).map((t) => t.respondedAt!.getTime() - t.createdAt.getTime());
+      const avgH = rt.length ? rt.reduce((x, y) => x + y, 0) / rt.length / 3600000 : null;
+      const q = (state: string) => ({ agent: a.publicId, state });
+      const stats: Stat[] = [
+        { label: 'Incidents Assigned', value: a.tasks.length, accent: '#2563eb', icon: 'doc', tip: 'Reports this agent was sent to verify', drill: { kind: 'agent.incidents', query: q('all'), title: `Incidents assigned to ${a.name}` } },
+        { label: 'Responded To', value: responded.length, accent: '#10b981', icon: 'checklist', tip: 'Incidents the agent acted on or completed', drill: { kind: 'agent.incidents', query: q('responded'), title: `Incidents ${a.name} responded to` } },
+        { label: 'Open Tasks', value: open.length, accent: '#f59e0b', icon: 'pending', tip: 'Assigned or in progress, not yet completed', drill: { kind: 'agent.incidents', query: q('open'), title: `Open tasks for ${a.name}` } },
+        { label: 'Avg Response', value: avgH == null ? '—' : avgH < 1 ? `${Math.round(avgH * 60)}m` : `${avgH.toFixed(1)}h`, accent: '#8b5cf6', icon: 'clock', tip: 'Average time from assignment to response', drill: { kind: 'agent.incidents', query: q('responded'), title: `Response times for ${a.name}` } },
+      ];
       return { type: 'agent', tag: 'Agents', title: a.name, subtitle: `${a.group?.name || 'Un-assigned'} · ${a.lga}`, status: a.status,
-        fields: { Phone: a.phone, Email: a.email || '—', NIN: a.nin ? `•••••••${a.nin.slice(-4)}` : '—', LGA: a.lga, Group: a.group?.name || 'Un-assigned', Status: a.status, Presence: isOnline(a.lastSeenAt) ? 'online' : 'offline', 'Last seen': fmt(a.lastSeenAt), Device: a.device || '—', Onboarded: fmt(a.createdAt) },
+        fields: { 'Government Tag': a.tag || '—', 'First Name': a.firstName || a.name.split(' ')[0], 'Last Name': a.lastName || a.name.split(' ').slice(1).join(' ') || '—', Phone: a.phone, Email: a.email || '—', LGA: a.lga, Group: a.group?.name || 'Un-assigned', Status: a.status, Presence: isOnline(a.lastSeenAt) ? 'online' : 'offline', 'Last Seen': fmt(a.lastSeenAt), Device: a.device || '—', Onboarded: fmt(a.createdAt) },
         links: { Group: a.group ? `/e/${a.group.publicId}` : '/agents/unassigned', Device: a.device && devIds.get(a.device) ? `/e/${devIds.get(a.device)}` : undefined, LGA: `/agents/active?lga=${encodeURIComponent(a.lga)}` },
-        dates: { Onboarded: a.createdAt, 'Last seen': a.lastSeenAt },
+        dates: { Onboarded: a.createdAt, 'Last Seen': a.lastSeenAt },
         geo: a.lat != null && a.lng != null ? { lat: a.lat, lng: a.lng, label: a.name, online: isOnline(a.lastSeenAt) } : null,
-        raw: { status: a.status, name: a.name, phone: a.phone, email: a.email, nin: a.nin, lga: a.lga, device: a.device, groupId: a.group?.publicId || null },
-        related: sameDevice.length ? [{ title: 'Users on the same device model', columns: USER_COLS.slice(0, 5), rows: sameDevice.map((x) => userRow(x, devIds)), linkKey: 'name' }] : [],
+        activity: days, activityKeys: [{ key: 'assigned', label: 'assigned' }, { key: 'responded', label: 'responded' }], stats,
+        raw: { status: a.status, name: a.name, firstName: a.firstName || a.name.split(' ')[0], lastName: a.lastName || a.name.split(' ').slice(1).join(' '), phone: a.phone, email: a.email, tag: a.tag, lga: a.lga, device: a.device, groupId: a.group?.publicId || null },
+        related: [{ title: 'Incidents Responded To', columns: TASK_COLS, rows: a.tasks.slice(0, 500).map(taskRow), linkKey: 'category' }],
         timeline: await timeline() };
     }
     const i = await p.incident.findUnique({ where: { publicId: id }, include: { reporter: true, categoryRef: true, media: { orderBy: { createdAt: 'desc' } }, dispatches: { orderBy: { createdAt: 'desc' } } } });
     if (i) return { type: 'incident', tag: 'Reports', title: i.category, subtitle: `${i.lga} · ${i.status}`, status: i.status,
-      fields: { Report: i.details, Location: i.location, LGA: i.lga, Status: i.status, Category: i.category, 'Risk level': i.categoryRef?.riskLevel || '—', Reporter: i.reporter?.name || 'Anonymous', 'Report date': fmt(i.createdAt), 'Acted upon': fmt(i.actedAt), Resolved: fmt(i.resolvedAt), 'Resolved by': i.resolvedBy || '—', Note: i.note || '—' },
+      fields: { Report: i.details, Location: i.location, LGA: i.lga, Status: i.status, Category: i.category, 'Risk Level': i.categoryRef?.riskLevel || '—', Reporter: i.reporter?.name || 'Anonymous', 'Report Date': fmt(i.createdAt), 'Acted Upon': fmt(i.actedAt), Resolved: fmt(i.resolvedAt), 'Resolved By': i.resolvedBy || '—', Note: i.note || '—' },
       links: { Reporter: i.reporter ? `/e/${i.reporter.publicId}` : undefined, Category: i.categoryRef ? `/e/${i.categoryRef.publicId}` : undefined, LGA: `/reports/analytics?lga=${encodeURIComponent(i.lga)}` },
-      dates: { 'Report date': i.createdAt, 'Acted upon': i.actedAt, Resolved: i.resolvedAt },
+      dates: { 'Report Date': i.createdAt, 'Acted Upon': i.actedAt, Resolved: i.resolvedAt },
       geo: i.lat != null && i.lng != null ? { lat: i.lat, lng: i.lng, label: i.category } : null,
       media: i.media.map((m) => ({ id: m.publicId, kind: m.kind, url: m.storage === 'local' ? `/api/media/${m.publicId}` : m.url, filename: m.filename, by: m.uploadedBy, date: fmt(m.createdAt), storage: m.storage })),
       raw: { status: i.status, category: i.category, details: i.details, location: `${i.location}`, date: fmt(i.createdAt), sendAgentCount: i.categoryRef?.sendAgentCount ?? null, agencies: [...new Set(i.dispatches.flatMap((d) => d.agencies))] },
-      related: [{ title: 'Dispatch history', columns: [{ key: 'agencies', label: 'Agencies' }, { key: 'by', label: 'By' }, { key: 'note', label: 'Note' }, { key: 'date', label: 'When' }], rows: i.dispatches.map((d) => ({ agencies: d.agencies.join(', '), by: d.byAdmin, note: d.note || '', date: fmt(d.createdAt), _ts: d.createdAt })) }],
+      related: [{ title: 'Dispatch History', columns: [{ key: 'agencies', label: 'Agencies' }, { key: 'by', label: 'By' }, { key: 'note', label: 'Note' }, { key: 'date', label: 'When' }], rows: i.dispatches.map((d) => ({ agencies: d.agencies.join(', '), by: d.byAdmin, note: d.note || '', date: fmt(d.createdAt), _ts: d.createdAt })) }],
       timeline: await timeline() };
     const al = await p.alarm.findUnique({ where: { publicId: id }, include: { user: true } });
     if (al) return { type: 'alarm', tag: 'Alarms', title: `${al.type === 'panic' ? 'Panic' : 'Duress'} alarm — ${al.sender}`, subtitle: al.status, status: al.status,
-      fields: { Sender: al.sender, Phone: al.phone, Location: al.location || '—', LGA: al.lga || '—', Type: al.type, Status: al.status, 'Alarm date': fmt(al.createdAt), Resolved: fmt(al.resolvedAt), 'Resolved by': al.resolvedBy || '—' },
-      links: { Sender: al.user ? `/e/${al.user.publicId}` : undefined }, dates: { 'Alarm date': al.createdAt, Resolved: al.resolvedAt },
+      fields: { Sender: al.sender, Phone: al.phone, Location: al.location || '—', LGA: al.lga || '—', Type: al.type, Status: al.status, 'Alarm Date': fmt(al.createdAt), Resolved: fmt(al.resolvedAt), 'Resolved By': al.resolvedBy || '—' },
+      links: { Sender: al.user ? `/e/${al.user.publicId}` : undefined }, dates: { 'Alarm Date': al.createdAt, Resolved: al.resolvedAt },
       geo: al.lat != null && al.lng != null ? { lat: al.lat, lng: al.lng, label: al.sender } : null, raw: { status: al.status, type: al.type }, related: [], timeline: await timeline() };
     const ad = await p.adminUser.findUnique({ where: { publicId: id }, include: { group: true } });
     if (ad) {
       const acts = await p.auditLog.findMany({ where: { actorId: ad.id }, orderBy: { createdAt: 'desc' }, take: 100 });
       return { type: 'admin', tag: 'Admins', title: ad.name, subtitle: `${ad.role} · ${ad.status}`, status: ad.status,
-        fields: { Email: ad.email, Phone: ad.phone || '—', Role: ad.role, Status: ad.status, Group: ad.group?.name || '—', 'Last login': fmt(ad.lastLoginAt), Created: fmt(ad.createdAt) },
-        links: { Group: ad.group ? `/e/${ad.group.publicId}` : undefined }, dates: { 'Last login': ad.lastLoginAt, Created: ad.createdAt },
+        fields: { Email: ad.email, Phone: ad.phone || '—', Role: ad.role, Status: ad.status, Group: ad.group?.name || '—', 'Last Login': fmt(ad.lastLoginAt), Created: fmt(ad.createdAt) },
+        links: { Group: ad.group ? `/e/${ad.group.publicId}` : undefined }, dates: { 'Last Login': ad.lastLoginAt, Created: ad.createdAt },
         raw: { name: ad.name, email: ad.email, phone: ad.phone, role: ad.role, status: ad.status, groupId: ad.group?.publicId || null },
-        related: [{ title: 'Recent actions by this admin', columns: AUDIT_COLS.filter((c) => c.key !== 'actor'), rows: acts.map(auditRow) }], timeline: await timeline() };
+        related: [{ title: 'Recent Actions By This Admin', columns: AUDIT_COLS.filter((c) => c.key !== 'actor'), rows: acts.map(auditRow) }], timeline: await timeline() };
     }
     const s = await p.securityAlert.findUnique({ where: { publicId: id } });
-    if (s) return { type: 'alert', tag: 'Tips', title: s.title, subtitle: `Sent by ${s.sender}`, status: 'sent', fields: { Alert: s.body, LGA: s.lga, 'User type': s.userType, Group: s.group, Sender: s.sender, Posted: fmt(s.createdAt) }, links: {}, dates: { Posted: s.createdAt }, raw: {}, related: [], timeline: await timeline() };
+    if (s) return { type: 'alert', tag: 'Tips', title: s.title, subtitle: `Sent by ${s.sender}`, status: 'sent', fields: { Alert: s.body, LGA: s.lga, 'User Type': s.userType, Group: s.group, Sender: s.sender, Posted: fmt(s.createdAt) }, links: {}, dates: { Posted: s.createdAt }, raw: {}, related: [], timeline: await timeline() };
     const g = await p.homelandGroup.findUnique({ where: { publicId: id }, include: { agents: { include: { group: true }, orderBy: { name: 'asc' } }, admins: true } });
     if (g) return { type: 'group', tag: 'Groups', title: g.name, subtitle: `${g.agents.length} agents · ${g.status}`, status: g.status,
       fields: { Description: g.description || '—', 'Base LGA': g.lga || '—', Status: g.status, Agents: String(g.agents.length), Active: String(g.agents.filter((x) => x.status === 'active').length), Online: String(g.agents.filter((x) => isOnline(x.lastSeenAt)).length), Created: fmt(g.createdAt) },
       links: {}, dates: { Created: g.createdAt }, raw: { name: g.name, description: g.description, lga: g.lga, status: g.status },
-      related: [{ title: 'Agents in this group', columns: AGENT_COLS, rows: g.agents.map(agentRow), linkKey: 'name', kind: 'group-agents' },
-        ...(g.admins.length ? [{ title: 'Group admins', columns: ADMIN_COLS, rows: g.admins.map(adminRow), linkKey: 'name' }] : [])], timeline: await timeline() };
+      related: [{ title: 'Agents In This Group', columns: AGENT_COLS, rows: g.agents.map(agentRow), linkKey: 'name', kind: 'group-agents' },
+        ...(g.admins.length ? [{ title: 'Group Admins', columns: ADMIN_COLS, rows: g.admins.map(adminRow), linkKey: 'name' }] : [])], timeline: await timeline() };
     const c = await p.reportCategory.findUnique({ where: { publicId: id }, include: { incidents: { orderBy: { createdAt: 'desc' }, take: 500, include: { reporter: true } } } });
     if (c) return { type: 'category', tag: 'Categories', title: c.name, subtitle: `Risk ${c.riskLevel} · send ${c.sendAgentCount} agents`, status: c.status,
-      fields: { Description: c.description || '—', 'Risk level': c.riskLevel, 'Agents to send': String(c.sendAgentCount), Status: c.status, Reports: String(c.incidents.length), Created: fmt(c.createdAt) },
+      fields: { Description: c.description || '—', 'Risk Level': c.riskLevel, 'Agents To Send': String(c.sendAgentCount), Status: c.status, Reports: String(c.incidents.length), Created: fmt(c.createdAt) },
       links: {}, dates: { Created: c.createdAt }, raw: { name: c.name, description: c.description, riskLevel: c.riskLevel, sendAgentCount: c.sendAgentCount, status: c.status },
-      related: [{ title: 'Reports in this category', columns: INC_COLS, rows: c.incidents.map(incidentRow), linkKey: 'category' }], timeline: await timeline() };
+      related: [{ title: 'Reports In This Category', columns: INC_COLS, rows: c.incidents.map(incidentRow), linkKey: 'category' }], timeline: await timeline() };
     const d = await p.device.findUnique({ where: { publicId: id } });
     if (d) {
       const [us, ags] = await Promise.all([p.user.findMany({ where: { device: d.label }, orderBy: { createdAt: 'desc' } }), p.agent.findMany({ where: { device: d.label }, include: { group: true }, orderBy: { createdAt: 'desc' } })]);
       return { type: 'device', tag: 'Devices', title: d.label, subtitle: `${us.length} users · ${ags.length} agents`, status: 'active',
-        fields: { OS: d.os || d.label.split('·')[0].trim(), Model: d.model || d.label.split('·')[1]?.trim() || '—', Users: String(us.length), Agents: String(ags.length), 'First seen': fmt(d.createdAt) },
-        links: {}, dates: { 'First seen': d.createdAt }, raw: {},
-        related: [{ title: 'Users on this device', columns: USER_COLS.filter((x) => x.key !== 'device'), rows: us.map((x) => userRow(x)), linkKey: 'name' },
-          { title: 'Agents on this device', columns: AGENT_COLS, rows: ags.map(agentRow), linkKey: 'name' }], timeline: [] };
+        fields: { OS: d.os || d.label.split('·')[0].trim(), Model: d.model || d.label.split('·')[1]?.trim() || '—', Users: String(us.length), Agents: String(ags.length), 'First Seen': fmt(d.createdAt) },
+        links: {}, dates: { 'First Seen': d.createdAt }, raw: {},
+        related: [{ title: 'Users On This Device', columns: USER_COLS.filter((x) => x.key !== 'device'), rows: us.map((x) => userRow(x)), linkKey: 'name' },
+          { title: 'Agents On This Device', columns: AGENT_COLS, rows: ags.map(agentRow), linkKey: 'name' }], timeline: [] };
     }
     throw new NotFoundException();
   }
@@ -248,13 +297,24 @@ export class RecordsController {
       const u = await p.user.findUnique({ where: { publicId: entity } });
       if (u) {
         if (u.createdAt >= r.gte && u.createdAt < r.lt) ev.push({ at: u.createdAt, text: 'Registered on the app' });
-        if (u.lastLogin && u.lastLogin >= r.gte && u.lastLogin < r.lt) ev.push({ at: u.lastLogin, text: 'Last login' });
+        if (u.lastLogin && u.lastLogin >= r.gte && u.lastLogin < r.lt) ev.push({ at: u.lastLogin, text: 'Last Login' });
         incidents.filter((i) => i.reporterId === u.id).forEach((i) => ev.push({ at: i.createdAt, text: `Reported ${i.category} (${i.status})`, href: `/e/${i.publicId}` }));
         alarms.filter((a) => a.userId === u.id).forEach((a) => ev.push({ at: a.createdAt, text: `Raised a ${a.type} alarm`, href: `/e/${a.publicId}` }));
       }
+      const ag = u ? null : await p.agent.findUnique({ where: { publicId: entity } });
+      if (ag) {
+        const ts = await p.agentTask.findMany({ where: { agentId: ag.id, OR: [{ createdAt: r }, { respondedAt: r }, { completedAt: r }] }, include: { incident: true } });
+        const inR = (d: Date | null) => !!d && d >= r.gte && d < r.lt;
+        ts.forEach((t) => {
+          if (inR(t.createdAt)) ev.push({ at: t.createdAt, text: `Assigned to ${t.incident.category} (${t.incident.lga})`, href: `/e/${t.incident.publicId}` });
+          if (inR(t.respondedAt)) ev.push({ at: t.respondedAt!, text: `Responded to ${t.incident.category}`, href: `/e/${t.incident.publicId}` });
+          if (inR(t.completedAt) && t.completedAt!.getTime() !== t.respondedAt?.getTime()) ev.push({ at: t.completedAt!, text: `Completed ${t.incident.category}`, href: `/e/${t.incident.publicId}` });
+        });
+        if (inR(ag.lastSeenAt)) ev.push({ at: ag.lastSeenAt!, text: 'Last seen online' });
+      }
       audit.filter((l) => l.entityId === entity).forEach((l) => ev.push({ at: l.createdAt, text: `${l.actorEmail}: ${l.summary}` }));
       ev.sort((a, b) => b.at.getTime() - a.at.getTime());
-      focus = { title: u?.name || 'This record', events: ev.map((e) => ({ time: fmt(e.at), text: e.text, href: e.href })) };
+      focus = { title: u?.name || ag?.name || 'This record', events: ev.map((e) => ({ time: fmt(e.at), text: e.text, href: e.href })) };
     }
     return {
       date, label: longDay(new Date(r.gte.getTime() + 3600000)),

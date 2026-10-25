@@ -53,14 +53,32 @@ const Siren = ({ c, c2 }: P) => (<>
   <rect x="8" y="34" width="32" height="7" rx="2.5" fill={c} />
   <circle cx="24" cy="29" r="2.6" fill={c} />
 </>);
-export const KPI_ICONS = { doc: Doc, truck: Truck, checklist: Checklist, seal: Seal, agent: Agent, suspended: Suspended, pending: Pending, siren: Siren };
+const Clock = ({ c, c2 }: P) => (<>
+  <circle cx="24" cy="25" r="16" fill={c2} stroke={c} strokeWidth="2" />
+  <circle cx="24" cy="25" r="11" fill="#fff" stroke={c} strokeOpacity=".4" strokeWidth="1.6" />
+  <path d="M24 18v7.5l5 3" stroke={c} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+  <path d="M19 5h10M24 5v4" stroke={c} strokeWidth="2.2" strokeLinecap="round" />
+</>);
+const Users = ({ c, c2 }: P) => (<>
+  <circle cx="32" cy="16" r="5" fill="#fff" stroke={c} strokeOpacity=".6" strokeWidth="2" />
+  <path d="M43 35c-1-5.4-4.6-8.5-9.5-8.5" fill="none" stroke={c} strokeOpacity=".6" strokeWidth="2" strokeLinecap="round" />
+  <circle cx="19" cy="15" r="6.5" fill={c2} stroke={c} strokeWidth="2" />
+  <path d="M6 39c1.4-7.6 6.4-12 13-12s11.6 4.4 13 12z" fill={c2} stroke={c} strokeWidth="2" strokeLinejoin="round" />
+</>);
+const Chart = ({ c, c2 }: P) => (<>
+  <rect x="7" y="7" width="34" height="34" rx="5" fill="#fff" stroke={c} strokeWidth="2" />
+  <rect x="13" y="25" width="5" height="10" rx="1.5" fill={c2} stroke={c} strokeWidth="1.8" />
+  <rect x="21.5" y="18" width="5" height="17" rx="1.5" fill={c} fillOpacity=".75" />
+  <rect x="30" y="13" width="5" height="22" rx="1.5" fill={c2} stroke={c} strokeWidth="1.8" />
+</>);
+export const KPI_ICONS = { doc: Doc, truck: Truck, checklist: Checklist, seal: Seal, agent: Agent, suspended: Suspended, pending: Pending, siren: Siren, clock: Clock, users: Users, chart: Chart };
 export type KpiIconName = keyof typeof KPI_ICONS;
 
 /** Soft tinted tile with an illustrated icon; colours derive from the card accent. */
-export function KpiIcon({ name, accent }: { name: KpiIconName; accent: string }) {
-  const I = KPI_ICONS[name];
+export function KpiIcon({ name, accent }: { name: KpiIconName | string; accent: string }) {
+  const I = KPI_ICONS[name as KpiIconName] || Doc;
   return (
-    <span className="k-ico" style={{ background: `linear-gradient(145deg, ${accent}1f, ${accent}0a)`, boxShadow: `inset 0 0 0 1px ${accent}26` }} aria-hidden>
+    <span className="k-ico" style={{ background: `${accent}14`, boxShadow: `inset 0 0 0 1px ${accent}26` }} aria-hidden>
       <svg viewBox="0 0 48 48" width="34" height="34" fill="none"><I c={accent} c2={`${accent}33`} /></svg>
     </span>
   );

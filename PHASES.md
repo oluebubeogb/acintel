@@ -83,10 +83,21 @@ _Status: Phases 0–6 are complete and verified locally on 25 Oct 2026. Phase 7 
   - volumes: `pgdata`, `redisdata`, `uploads`.
 - **Config and docs:** a complete `.env.example`; `COOKIE_SECURE=auto` with proxy `X-Forwarded-*` forwarding; SSE anti-buffering headers; the README's Coolify path.
 
+## UI polish (Coolify feedback, Oct 2026)
+- **Shell:** web port defaults to `3131` (`WEB_HOST_PORT`); global search ~1.25× wider (5:3 flex share vs the spacer, cap 800px); calmer bell/badge/clock spacing; no live/badge dots; soft alert chime.
+- **Nav:** the sub-pane opens directly under the clicked tile's row; 2 tile columns by default, 3 at ≥1600px and on mobile (≤900px); no chevrons.
+- **Look:** solid calm-blue buttons, bold blue links, Title Case (non-uppercase) labels and headers, mini colour icons beside small labels; PageHead shows only the title + actions (no crumbs/subtitle, no page-count line); tooltips sit above filter rows; modals sit above hovered cards.
+- **Tables:** single-table pages paginate instead of scrolling inside the card; multi-table pages (entity detail, drills) keep the inner scroll.
+- **Audit:** short human-readable actions ("Dispatched incident", not `incident.dispatch`) with an area chip.
+- **Alarms:** Duress/Panic lists exclude items that are still new (they live under Alarms › New).
+- **Agents:** detail mirrors the user card (KPI cards with drill-down, engagement, tables); the form starts with Government Tag, then First/Last Name, Email is required, Device is read-only. Migration `20261025120000_ui_polish_agents` renames `nin` → `tag`, adds `firstName`/`lastName` (backfilled from `name`) and the `AgentTask` table, and remaps panic/duress notification targets to `alarms.new`.
+- **Analytics:** dashboard-style KPI cards; each drills into a modal with CSV and "Open as Page" (generic `/records?kind=…` page, also used by the dashboard and entity drills).
+- **AI assistant:** helper texts removed and the FAB hides while the panel is open (panel 26px from the bottom). Provider fixes for RunPod and other OpenAI-compatible endpoints: base-URL normalisation, RunPod queue polling, `/models` auto-discovery, retries on 429/5xx, `<think>` stripping, and a no-tools retry when a reply comes back empty. Errors are logged as `[AI]` and the user sees a short retry message instead of the old "offline mode" text. New env vars: `OPENAI_TIMEOUT_MS` (120000) and `OPENAI_MAX_TOKENS` (1024).
+
 ## Known gaps / notes
 - **Phase 7** (live Homeland read sync + dispatch write-back) is not implemented; `apps/api/src/dataport.ts` is still the no-op seam.
 - **Google Maps** is not a drop-in, for licensing reasons. `GOOGLE_MAPS_API_KEY` is reserved. For production, use a proper tile provider or self-hosted tiles rather than tile.openstreetmap.org.
 - **`group_admin`** is read-only in v1; it is not yet limited to its own groups.
 - **Day overlay:** the "Admin actions" stat can differ slightly from the tab count. The stat counts audit rows by actor; the tab includes rows about the user.
-- **AI answer quality** depends on the model you point at. It must support tool calls.
+- **AI answer quality** depends on the model you point at. Tool calls give the best answers; models without tool support fall back to a plain reply built from engine data.
 - **Not yet run under a Docker daemon**, because this build box has none. The first `docker compose up` on Coolify is the end-to-end check.

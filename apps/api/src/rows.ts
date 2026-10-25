@@ -5,15 +5,15 @@ import { ONLINE_MS } from './geo';
 export type Col = { key: string; label: string };
 export type Row = Record<string, unknown> & { _id?: string; _links?: Record<string, string>; _ts?: Date | string };
 
-export const USER_COLS: Col[] = [{ key: 'name', label: 'User' }, { key: 'phone', label: 'Phone' }, { key: 'email', label: 'Email' }, { key: 'lga', label: 'LGA' }, { key: 'status', label: 'Status' }, { key: 'device', label: 'Current device' }, { key: 'regDate', label: 'Reg date' }, { key: 'lastLogin', label: 'Last login' }];
-export const AGENT_COLS: Col[] = [{ key: 'name', label: 'Agent' }, { key: 'phone', label: 'Phone' }, { key: 'lga', label: 'LGA' }, { key: 'group', label: 'Group' }, { key: 'status', label: 'Status' }, { key: 'online', label: 'Presence' }, { key: 'regDate', label: 'Onboarded' }];
-export const INC_COLS: Col[] = [{ key: 'category', label: 'Category' }, { key: 'details', label: 'Report' }, { key: 'location', label: 'Location' }, { key: 'reporter', label: 'Reporter' }, { key: 'status', label: 'Status' }, { key: 'date', label: 'Report date' }];
-export const ALARM_COLS: Col[] = [{ key: 'sender', label: 'Sender' }, { key: 'phone', label: 'Phone' }, { key: 'location', label: 'Location' }, { key: 'type', label: 'Type' }, { key: 'status', label: 'Status' }, { key: 'date', label: 'Alarm date' }];
-export const ALERT_COLS: Col[] = [{ key: 'sender', label: 'Sender' }, { key: 'title', label: 'Title' }, { key: 'body', label: 'Security alert' }, { key: 'receiver', label: 'Audience' }, { key: 'date', label: 'Posted' }];
-export const GROUP_COLS: Col[] = [{ key: 'name', label: 'Homeland group' }, { key: 'description', label: 'Description' }, { key: 'lga', label: 'Base LGA' }, { key: 'agents', label: 'Agents' }, { key: 'activeAgents', label: 'Active' }, { key: 'status', label: 'Status' }, { key: 'date', label: 'Created' }];
-export const CAT_COLS: Col[] = [{ key: 'name', label: 'Category' }, { key: 'riskLevel', label: 'Risk level' }, { key: 'sendAgentCount', label: 'Agents to send' }, { key: 'reports', label: 'Reports' }, { key: 'status', label: 'Status' }, { key: 'date', label: 'Created' }];
-export const ADMIN_COLS: Col[] = [{ key: 'name', label: 'Admin' }, { key: 'email', label: 'Email' }, { key: 'phone', label: 'Phone' }, { key: 'role', label: 'Role' }, { key: 'status', label: 'Status' }, { key: 'lastLogin', label: 'Last login' }];
-export const DEVICE_COLS: Col[] = [{ key: 'label', label: 'Device' }, { key: 'os', label: 'OS' }, { key: 'users', label: 'Users' }, { key: 'agents', label: 'Agents' }, { key: 'date', label: 'First seen' }];
+export const USER_COLS: Col[] = [{ key: 'name', label: 'User' }, { key: 'phone', label: 'Phone' }, { key: 'email', label: 'Email' }, { key: 'lga', label: 'LGA' }, { key: 'status', label: 'Status' }, { key: 'device', label: 'Current Device' }, { key: 'regDate', label: 'Reg Date' }, { key: 'lastLogin', label: 'Last Login' }];
+export const AGENT_COLS: Col[] = [{ key: 'name', label: 'Agent' }, { key: 'tag', label: 'Government Tag' }, { key: 'phone', label: 'Phone' }, { key: 'lga', label: 'LGA' }, { key: 'group', label: 'Group' }, { key: 'status', label: 'Status' }, { key: 'online', label: 'Presence' }, { key: 'regDate', label: 'Onboarded' }];
+export const INC_COLS: Col[] = [{ key: 'category', label: 'Category' }, { key: 'details', label: 'Report' }, { key: 'location', label: 'Location' }, { key: 'reporter', label: 'Reporter' }, { key: 'status', label: 'Status' }, { key: 'date', label: 'Report Date' }];
+export const ALARM_COLS: Col[] = [{ key: 'sender', label: 'Sender' }, { key: 'phone', label: 'Phone' }, { key: 'location', label: 'Location' }, { key: 'type', label: 'Type' }, { key: 'status', label: 'Status' }, { key: 'date', label: 'Alarm Date' }];
+export const ALERT_COLS: Col[] = [{ key: 'sender', label: 'Sender' }, { key: 'title', label: 'Title' }, { key: 'body', label: 'Security Alert' }, { key: 'receiver', label: 'Audience' }, { key: 'date', label: 'Posted' }];
+export const GROUP_COLS: Col[] = [{ key: 'name', label: 'Homeland Group' }, { key: 'description', label: 'Description' }, { key: 'lga', label: 'Base LGA' }, { key: 'agents', label: 'Agents' }, { key: 'activeAgents', label: 'Active' }, { key: 'status', label: 'Status' }, { key: 'date', label: 'Created' }];
+export const CAT_COLS: Col[] = [{ key: 'name', label: 'Category' }, { key: 'riskLevel', label: 'Risk Level' }, { key: 'sendAgentCount', label: 'Agents To Send' }, { key: 'reports', label: 'Reports' }, { key: 'status', label: 'Status' }, { key: 'date', label: 'Created' }];
+export const ADMIN_COLS: Col[] = [{ key: 'name', label: 'Admin' }, { key: 'email', label: 'Email' }, { key: 'phone', label: 'Phone' }, { key: 'role', label: 'Role' }, { key: 'status', label: 'Status' }, { key: 'lastLogin', label: 'Last Login' }];
+export const DEVICE_COLS: Col[] = [{ key: 'label', label: 'Device' }, { key: 'os', label: 'OS' }, { key: 'users', label: 'Users' }, { key: 'agents', label: 'Agents' }, { key: 'date', label: 'First Seen' }];
 export const AUDIT_COLS: Col[] = [{ key: 'date', label: 'When' }, { key: 'actor', label: 'Admin' }, { key: 'action', label: 'Action' }, { key: 'summary', label: 'Details' }, { key: 'ip', label: 'IP' }];
 
 const clean = (o: Record<string, string | undefined | null>) => Object.fromEntries(Object.entries(o).filter(([, v]) => !!v)) as Record<string, string>;
@@ -25,7 +25,7 @@ export const userRow = (u: any, devIds?: Map<string, string>): Row => ({
   _links: clean({ device: u.device && devIds?.get(u.device) ? `/e/${devIds.get(u.device)}` : null }),
 });
 export const agentRow = (a: any): Row => ({
-  _id: a.publicId, name: a.name, phone: a.phone, lga: a.lga, group: a.group?.name || 'Un-assigned', status: a.status,
+  _id: a.publicId, name: a.name, tag: a.tag || '', phone: a.phone, lga: a.lga, group: a.group?.name || 'Un-assigned', status: a.status,
   online: isOnline(a.lastSeenAt) ? 'online' : 'offline', regDate: fmt(a.createdAt), _ts: a.createdAt, _groupId: a.group?.publicId || null,
   _links: clean({ group: a.group ? `/e/${a.group.publicId}` : null }),
 });
@@ -42,4 +42,22 @@ export const alertRow = (a: any): Row => ({ _id: a.publicId, sender: a.sender, t
 export const groupRow = (g: any): Row => ({ _id: g.publicId, name: g.name, description: g.description || '', lga: g.lga || '', agents: g._count?.agents ?? 0, activeAgents: g.activeAgents ?? '', status: g.status, date: fmt(g.createdAt), _ts: g.createdAt });
 export const categoryRow = (c: any): Row => ({ _id: c.publicId, name: c.name, riskLevel: c.riskLevel, sendAgentCount: c.sendAgentCount, reports: c._count?.incidents ?? 0, status: c.status, date: fmt(c.createdAt), _ts: c.createdAt, description: c.description || '' });
 export const adminRow = (a: any): Row => ({ _id: a.publicId, name: a.name, email: a.email, phone: a.phone || '', role: a.role, status: a.status, lastLogin: fmt(a.lastLoginAt), _groupId: a.group?.publicId || null });
-export const auditRow = (l: any): Row => ({ _id: l.entityId || undefined, date: fmt(l.createdAt), actor: l.actorEmail, action: l.action, summary: l.summary, ip: l.ip || '', _ts: l.createdAt, _auditId: l.id, _entityType: l.entityType });
+export const auditRow = (l: any): Row => ({ _id: l.entityId || undefined, date: fmt(l.createdAt), actor: l.actorEmail, action: actionLabel(l.action), _action: l.action, summary: l.summary, ip: l.ip || '', _ts: l.createdAt, _auditId: l.id, _entityType: l.entityType });
+
+/** Short human label for an audit action code: incident.dispatch → "Dispatch", auth.login → "Login". */
+const VERB: Record<string, string> = { create: 'Add', update: 'Edit', delete: 'Delete', send: 'Send', resolve: 'Resolve', upload: 'Upload', link: 'Link', approve: 'Approve', activate: 'Activate', suspend: 'Suspend', reset_password: 'Reset Password' };
+const NOUN: Record<string, string> = { user: 'User', agent: 'Agent', admin: 'Admin', group: 'Group', category: 'Category', alert: 'Alert', alarm: 'Alarm', media: 'Media' };
+const FIXED: Record<string, string> = {
+  'incident.dispatch': 'Dispatch', 'incident.acted': 'Acted Upon', 'incident.resolved': 'Resolve', 'incident.fake': 'Mark Fake',
+  'auth.login': 'Login', 'auth.logout': 'Logout', 'auth.login_failed': 'Failed Login', 'settings.site': 'Site Settings', 'admin.reset_password': 'Reset Password',
+};
+const title = (s: string) => s.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+export function actionLabel(code: string): string {
+  if (!code) return '';
+  if (code.endsWith('.undo')) return `Undo ${actionLabel(code.slice(0, -5))}`;
+  if (FIXED[code]) return FIXED[code];
+  const [ent, verb = ''] = code.split('.');
+  if (ent === 'import') return `Import ${title(verb)}`;
+  if (VERB[verb] && NOUN[ent]) return `${VERB[verb]} ${NOUN[ent]}`;
+  return title(verb || ent);
+}

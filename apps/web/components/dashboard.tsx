@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell as PieCell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Activity, ArrowUpRight, RefreshCw } from 'lucide-react';
-import { api, lagosTime } from '@/lib/api';
+import { api } from '@/lib/api';
 import { PageHead } from './shell';
 import { DrillOverlay } from './overlays';
 import { useApp } from './providers';
@@ -12,7 +12,7 @@ type Summary = { incidents: Record<string, number>; agents: Record<string, numbe
   trend: { label: string; new: number; dispatched: number; acted: number; resolved: number }[]; lga: { lga: string; count: number }[]; at: string };
 const SERIES = [
   { key: 'new', label: 'New', color: '#2563eb' }, { key: 'dispatched', label: 'Dispatched', color: '#7c3aed' },
-  { key: 'acted', label: 'Acted upon', color: '#f59e0b' }, { key: 'resolved', label: 'Resolved', color: '#10b981' },
+  { key: 'acted', label: 'Acted Upon', color: '#f59e0b' }, { key: 'resolved', label: 'Resolved', color: '#10b981' },
 ] as const;
 
 function Tip({ active, payload, label }: any) {
@@ -35,13 +35,13 @@ export function Dashboard() {
   // KPI numbers tick live from /counts (polled while visible + SSE push); charts come from /dashboard/summary.
   const K = s ? (counts.kpi ? { ...s, ...counts.kpi } : s) : null;
   const kpis: { label: string; v: number; accent: string; kind: string; href: string; foot: string; icon: KpiIconName }[] = K ? [
-    { label: 'New incidents', v: n(K.incidents, 'new'), accent: '#2563eb', kind: 'reports.new', href: '/reports/new', foot: 'Awaiting dispatch', icon: 'doc' },
+    { label: 'New Incidents', v: n(K.incidents, 'new'), accent: '#2563eb', kind: 'reports.new', href: '/reports/new', foot: 'Awaiting dispatch', icon: 'doc' },
     { label: 'Dispatched', v: n(K.incidents, 'dispatched'), accent: '#7c3aed', kind: 'reports.dispatched', href: '/reports/dispatched', foot: 'With agencies', icon: 'truck' },
-    { label: 'Acted upon', v: n(K.incidents, 'acted'), accent: '#f59e0b', kind: 'reports.acted', href: '/reports/acted', foot: 'In progress', icon: 'checklist' },
+    { label: 'Acted Upon', v: n(K.incidents, 'acted'), accent: '#f59e0b', kind: 'reports.acted', href: '/reports/acted', foot: 'In progress', icon: 'checklist' },
     { label: 'Resolved', v: n(K.incidents, 'resolved'), accent: '#10b981', kind: 'reports.resolved', href: '/reports/resolved', foot: n(K.incidents, 'fake') ? `Closed · ${n(K.incidents, 'fake')} marked fake` : 'Closed', icon: 'seal' },
-    { label: 'Active agents', v: n(K.agents, 'active'), accent: '#0d9488', kind: 'agents.active', href: '/agents/active', foot: `${n(K.agents, 'online')} online · ${n(K.agents, 'unassigned')} un-assigned`, icon: 'agent' },
-    { label: 'Suspended agents', v: n(K.agents, 'suspended'), accent: '#e11d48', kind: 'agents.suspended', href: '/agents/suspended', foot: 'Click to review', icon: 'suspended' },
-    { label: 'Pending users', v: n(K.users, 'pending'), accent: '#f97316', kind: 'users.pending', href: '/users/pending', foot: `${n(K.users, 'active')} active users`, icon: 'pending' },
+    { label: 'Active Agents', v: n(K.agents, 'active'), accent: '#0d9488', kind: 'agents.active', href: '/agents/active', foot: `${n(K.agents, 'online')} online · ${n(K.agents, 'unassigned')} un-assigned`, icon: 'agent' },
+    { label: 'Suspended Agents', v: n(K.agents, 'suspended'), accent: '#e11d48', kind: 'agents.suspended', href: '/agents/suspended', foot: 'Click to review', icon: 'suspended' },
+    { label: 'Pending Users', v: n(K.users, 'pending'), accent: '#f97316', kind: 'users.pending', href: '/users/pending', foot: `${n(K.users, 'active')} active users`, icon: 'pending' },
     { label: 'Alarms', v: n(K.alarmsNew, 'panic') + n(K.alarmsNew, 'duress'), accent: '#db2777', kind: 'alarms.new', href: '/alarms/new', foot: `New: ${n(K.alarmsNew, 'panic')} panic · ${n(K.alarmsNew, 'duress')} duress`, icon: 'siren' },
   ] : [];
   const agentPie = s ? [
@@ -56,15 +56,14 @@ export function Dashboard() {
 
   return (
     <>
-      <PageHead crumbs={[{ label: 'AcIntel' }, { label: 'Dashboard' }]} title="Control room overview"
-        subtitle={s ? `Live picture across Abia · updated ${lagosTime(s.at)} WAT` : 'Loading live picture…'}
+      <PageHead title="Control Room Overview"
         actions={<>
           <div className="seg" role="group" aria-label="Chart period">{[7, 14, 30, 90].map((d) => <button key={d} className={days === d ? 'on' : ''} onClick={() => setDays(d)} data-tip={`Charts over the last ${d} days`}>{d}d</button>)}</div>
           <button className="btn" onClick={load} data-tip="Refresh now"><RefreshCw size={15} /> Refresh</button></>} />
       <div className="grid kpis" style={{ marginBottom: 16 }}>
         {!s && Array.from({ length: 8 }).map((_, i) => <div key={i} className="kpi"><div className="skeleton" style={{ width: '50%' }} /><div className="skeleton" style={{ width: '30%', height: 26, marginTop: 10 }} /></div>)}
         {kpis.map((k) => (
-          <button key={k.label} className="kpi" style={{ ['--accent' as any]: k.accent }} onClick={() => setDrill({ kind: k.kind, title: k.label, href: k.href })} data-tip={`Drill into ${k.v} ${k.label.toLowerCase()}`}>
+          <button key={k.label} className="kpi" style={{ ['--accent' as any]: k.accent }} onClick={() => setDrill({ kind: k.kind, title: k.label, href: k.href })} data-tip={`${k.foot} · click to drill into ${k.v.toLocaleString('en-NG')}`}>
             <div className="k-label">{k.label}</div>
             <div className="k-val" key={k.v} data-live="1">{k.v.toLocaleString('en-NG')}</div>
             <div className="k-foot">{k.foot}</div>
@@ -89,7 +88,7 @@ export function Dashboard() {
           </div>
         </div>
         <div className="card">
-          <div className="card-head"><div><h3>Agents & users</h3><p>Click a slice to drill down</p></div></div>
+          <div className="card-head"><div><h3>Agents & Users</h3><p>Click a slice to drill down</p></div></div>
           <div className="chart-box" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
             {s && [['Agents', agentPie], ['Users', userPie]].map(([name, data]: any) => (
               <div key={name} style={{ position: 'relative' }}>
@@ -113,19 +112,18 @@ export function Dashboard() {
           <div className="card-head"><div><h3>Reports by LGA</h3><p>Top local government areas · last {days} days</p></div></div>
           <div className="chart-box" style={{ height: 260 }}>
             {s && <ResponsiveContainer><BarChart data={s.lga} margin={{ top: 16, right: 12, left: -16, bottom: 0 }}>
-              <defs><linearGradient id="bar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#2563eb" /><stop offset="1" stopColor="#10b981" /></linearGradient></defs>
-              <CartesianGrid vertical={false} stroke="#edf0f5" />
+                            <CartesianGrid vertical={false} stroke="#edf0f5" />
               <XAxis dataKey="lga" tickLine={false} axisLine={false} tick={{ fontSize: 10.5, fill: '#6a7a90' }} interval={0} />
               <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6a7a90' }} />
               <Tooltip content={<Tip />} cursor={{ fill: 'rgba(37,99,235,.06)' }} />
-              <Bar dataKey="count" name="Reports" fill="url(#bar)" radius={[6, 6, 0, 0]} maxBarSize={36} animationDuration={600} />
+              <Bar dataKey="count" name="Reports" fill="#2f6fde" radius={[6, 6, 0, 0]} maxBarSize={36} animationDuration={600} />
             </BarChart></ResponsiveContainer>}
           </div>
         </div>
         <div className="card">
-          <div className="card-head"><div><h3>Live new-ins</h3><p>Unread across the platform</p></div><span className="live-dot" /></div>
+          <div className="card-head"><div><h3>Live New-Ins</h3><p>Unread across the platform</p></div></div>
           <div style={{ padding: '12px 20px 18px', display: 'grid', gap: 8 }}>
-            {[['users.pending', 'New user signups', '/users/pending'], ['reports.new', 'New reports', '/reports/new'], ['alarms.panic', 'Panic alarms', '/alarms/panic'], ['alarms.duress', 'Duress alarms', '/alarms/duress'], ['agents.unassigned', 'Agents to assign', '/agents/unassigned']].map(([k, l, h]) => (
+            {[['users.pending', 'New User Signups', '/users/pending'], ['reports.new', 'New Reports', '/reports/new'], ['alarms.new', 'New Alarms', '/alarms/new'], ['agents.unassigned', 'Agents to Assign', '/agents/unassigned']].map(([k, l, h]) => (
               <button key={k} className="side-link" style={{ justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => setDrill({ kind: k, title: l, href: h })}>
                 <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}><Activity size={15} color="var(--blue)" />{l}</span>
                 <span className={`chip ${counts.targets[k] ? 'rose' : ''}`}>{counts.targets[k] || 0} new</span>

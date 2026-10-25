@@ -38,3 +38,7 @@ export function timeAgo(d: string | Date) {
   if (s < 60) return `${s}s ago`; const m = Math.round(s / 60); if (m < 60) return `${m}m ago`;
   const h = Math.round(m / 60); if (h < 24) return `${h}h ago`; return lagosTime(d);
 }
+
+/** "Acted upon reports" → "Acted Upon Reports" (keeps acronyms like LGA, CSV; small joining words stay lower). */
+const SMALL = new Set(['a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'by', 'for', 'the', 'as', 'at', 'vs']);
+export const titleCase = (s: string) => s.replace(/[A-Za-z][\w'’]*/g, (w, i: number) => (i > 0 && SMALL.has(w.toLowerCase()) ? w.toLowerCase() : w[0].toUpperCase() + w.slice(1)));

@@ -125,10 +125,12 @@ model Agent {
   id         String         @id @default(cuid())
   publicId   String         @unique
   legacyId   String?        @unique
-  name       String
+  name       String // "First Last" — kept in sync for search/lists
+  firstName  String?
+  lastName   String?
   phone      String
   email      String?
-  nin        String?
+  tag        String? // Government Tag (was NIN)
   lga        String
   groupId    String? // null = un-assigned
   group      HomelandGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
@@ -138,9 +140,29 @@ model Agent {
   lng        Float?
   lastSeenAt DateTime?
   createdAt  DateTime       @default(now())
+  tasks      AgentTask[]
 
   @@index([status])
   @@index([lga])
+  @@index([tag])
+}
+
+/// Incident ↔ agent assignment (auto-assigned on dispatch; mirrors Homeland "send agents to verify").
+/// status: assigned → responded (acted upon) → completed (resolved) | declined
+model AgentTask {
+  id          String    @id @default(cuid())
+  agentId     String
+  agent       Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  incidentId  String
+  incident    Incident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  status      String    @default("assigned")
+  assignedBy  String?
+  createdAt   DateTime  @default(now())
+  respondedAt DateTime?
+  completedAt DateTime?
+
+  @@unique([agentId, incidentId])
+  @@index([incidentId])
 }
 
 model Incident {
@@ -165,6 +187,7 @@ model Incident {
   note        String?
   dispatches  Dispatch[]
   media       IncidentMedia[]
+  tasks       AgentTask[]
 
   @@index([status])
   @@index([createdAt])

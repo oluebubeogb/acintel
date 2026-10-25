@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Copy, KeyRound, Send, Upload, UserPlus, Users } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, titleCase } from '@/lib/api';
 import { useApp } from './providers';
 import { ImportModal, Modal } from './ui';
 
@@ -23,25 +23,28 @@ function useForm(init: F) {
   return { f, setF, set };
 }
 const Field = ({ label, children, full, hint }: { label: string; children: React.ReactNode; full?: boolean; hint?: string }) => (
-  <div className="field" style={full ? { gridColumn: '1 / -1' } : undefined}><label className="label">{label}</label>{children}{hint && <div className="hint" style={{ marginTop: 4 }}>{hint}</div>}</div>
+  <div className="field" style={full ? { gridColumn: '1 / -1' } : undefined}><label className="label">{titleCase(label)}</label>{children}{hint && <div className="hint" style={{ marginTop: 4 }}>{hint}</div>}</div>
 );
 const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 };
 
 /* ---------------- Agents ---------------- */
-function AgentFields({ f, set, groups }: { f: F; set: (k: string) => any; groups: Group[] }) {
+function AgentFields({ f, set, groups, edit }: { f: F; set: (k: string) => any; groups: Group[]; edit?: boolean }) {
   return (
     <div style={grid}>
-      <Field label="Full name"><input className="input" required minLength={2} value={f.name} onChange={set('name')} placeholder="e.g. Ngozi Eze" /></Field>
+      <Field label="Government Tag" hint="Official ID tag, e.g. AHS/UMN/0142"><input className="input" required minLength={3} maxLength={40} value={f.tag} onChange={set('tag')} placeholder="AHS/UMN/0142" autoFocus={!edit} /></Field>
+      <Field label="First Name"><input className="input" required minLength={2} value={f.firstName} onChange={set('firstName')} placeholder="e.g. Ngozi" /></Field>
+      <Field label="Last Name"><input className="input" required minLength={2} value={f.lastName} onChange={set('lastName')} placeholder="e.g. Eze" /></Field>
       <Field label="Phone" hint="Nigerian mobile, e.g. 0803 123 4567"><input className="input" required value={f.phone} onChange={set('phone')} inputMode="tel" /></Field>
-      <Field label="Email (optional)"><input className="input" type="email" value={f.email} onChange={set('email')} /></Field>
-      <Field label="NIN (optional)" hint="11 digits — stored masked in views"><input className="input" value={f.nin} onChange={set('nin')} inputMode="numeric" maxLength={11} /></Field>
+      <Field label="Email"><input className="input" type="email" required value={f.email} onChange={set('email')} placeholder="name@example.com" /></Field>
       <Field label="LGA"><select className="select" value={f.lga} onChange={set('lga')}>{LGAS.map((l) => <option key={l}>{l}</option>)}</select></Field>
-      <Field label="Homeland group"><select className="select" value={f.groupId} onChange={set('groupId')}><option value="">Un-assigned</option>{groups.filter((g) => g.status === 'active' || g.publicId === f.groupId).map((g) => <option key={g.publicId} value={g.publicId}>{g.name}</option>)}</select></Field>
-      <Field label="Device (optional)"><input className="input" value={f.device} onChange={set('device')} placeholder="Android 14 · TECNO KI5" /></Field>
+      <Field label="Homeland Group"><select className="select" value={f.groupId} onChange={set('groupId')}><option value="">Un-assigned</option>{groups.filter((g) => g.status === 'active' || g.publicId === f.groupId).map((g) => <option key={g.publicId} value={g.publicId}>{g.name}</option>)}</select></Field>
+      {edit && <Field label="Device" hint="Set by the agent's app on sign-in"><input className="input" value={f.device || '—'} readOnly disabled /></Field>}
     </div>
   );
 }
-const agentInit = (r?: F): F => ({ name: r?.name || '', phone: r?.phone || '', email: r?.email || '', nin: r?.nin || '', lga: r?.lga || 'Umuahia North', groupId: r?.groupId || '', device: r?.device || '' });
+const AGENT_KEYS = ['tag', 'firstName', 'lastName', 'phone', 'email', 'lga', 'groupId'];
+const agentInit = (r?: F): F => ({ tag: r?.tag || '', firstName: r?.firstName || '', lastName: r?.lastName || '', phone: r?.phone || '', email: r?.email || '', lga: r?.lga || 'Umuahia North', groupId: r?.groupId || '', device: r?.device || '' });
+const agentBody = (f: F) => Object.fromEntries(AGENT_KEYS.map((k) => [k, k === 'groupId' ? f[k] || null : f[k]]));
 
 export function AddAgentForm() {
   const { toast, can } = useApp(); const router = useRouter();
@@ -50,7 +53,7 @@ export function AddAgentForm() {
   const [busy, setBusy] = useState(false); const [imp, setImp] = useState(false);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true);
-    try { const r = await api<{ id: string }>('/agents', { method: 'POST', json: { ...f, groupId: f.groupId || null } }); toast(`Agent ${f.name} added`); setF(agentInit()); router.push(`/e/${r.id}`); }
+    try { const r = await api<{ id: string }>('/agents', { method: 'POST', json: agentBody(f) }); toast(`Agent ${f.firstName} ${f.lastName} added`); setF(agentInit()); router.push(`/e/${r.id}`); }
     catch (x: any) { toast(x.message, 'error'); } finally { setBusy(false); }
   };
   return (
@@ -59,7 +62,7 @@ export function AddAgentForm() {
         <AgentFields f={f} set={set} groups={groups} />
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
           <button type="button" className="btn" onClick={() => setImp(true)} data-tip="Bulk onboard agents from a CSV file"><Upload size={15} /> Import CSV</button>
-          <button className="btn btn-primary" disabled={busy || !can('ops')}><UserPlus size={15} /> {busy ? 'Saving…' : 'Add local agent'}</button>
+          <button className="btn btn-primary" disabled={busy || !can('ops')}><UserPlus size={15} /> {busy ? 'Saving…' : 'Add Local Agent'}</button>
         </div>
       </form>
       {imp && <ImportModal kind="agents" onClose={() => setImp(false)} onDone={() => router.push('/agents/active')} />}
@@ -71,11 +74,11 @@ export function EditAgentModal({ raw, id, onClose, onDone }: { raw: F; id: strin
   const { f, set } = useForm(agentInit(raw)); const [busy, setBusy] = useState(false);
   const save = async () => {
     setBusy(true);
-    const changed = Object.fromEntries(Object.entries(f).filter(([k, v]) => (raw[k] || '') !== v).map(([k, v]) => [k, k === 'groupId' ? v || null : v]));
+    const changed = Object.fromEntries(AGENT_KEYS.filter((k) => (raw[k] || '') !== f[k]).map((k) => [k, k === 'groupId' ? f[k] || null : f[k]]));
     try { if (Object.keys(changed).length) await api(`/agents/${id}`, { method: 'PATCH', json: changed }); toast('Agent updated'); onDone(); onClose(); }
     catch (x: any) { toast(x.message, 'error'); } finally { setBusy(false); }
   };
-  return <Modal title="Edit agent" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={busy} onClick={save}>Save changes</button></>}><AgentFields f={f} set={set} groups={groups} /></Modal>;
+  return <Modal title="Edit Agent" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={busy} onClick={save}>Save Changes</button></>}><AgentFields edit f={f} set={set} groups={groups} /></Modal>;
 }
 
 /** Assign / remove marked agents to/from a group. */
@@ -106,7 +109,7 @@ export function GroupModal({ raw, id, onClose, onDone }: { raw?: F; id?: string;
     catch (x: any) { toast(x.message, 'error'); } finally { setBusy(false); }
   };
   return (
-    <Modal title={id ? 'Edit group' : 'New Homeland group'} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={busy || f.name.trim().length < 2} onClick={save}>{id ? 'Save' : 'Create group'}</button></>}>
+    <Modal title={id ? 'Edit Group' : 'New Homeland Group'} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={busy || f.name.trim().length < 2} onClick={save}>{id ? 'Save' : 'Create Group'}</button></>}>
       <div style={grid}>
         <Field label="Name"><input className="input" value={f.name} onChange={set('name')} autoFocus /></Field>
         <Field label="Base LGA"><select className="select" value={f.lga} onChange={set('lga')}><option value="">—</option>{LGAS.map((l) => <option key={l}>{l}</option>)}</select></Field>
@@ -126,7 +129,7 @@ export function CategoryModal({ raw, id, onClose, onDone }: { raw?: F; id?: stri
     catch (x: any) { toast(x.message, 'error'); } finally { setBusy(false); }
   };
   return (
-    <Modal title={id ? 'Edit category' : 'New report category'} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={busy || f.name.trim().length < 2} onClick={save}>{id ? 'Save' : 'Create category'}</button></>}>
+    <Modal title={id ? 'Edit Category' : 'New Report Category'} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={busy || f.name.trim().length < 2} onClick={save}>{id ? 'Save' : 'Create Category'}</button></>}>
       <div style={grid}>
         <Field label="Name"><input className="input" value={f.name} onChange={set('name')} autoFocus /></Field>
         <Field label="Risk level"><select className="select" value={f.riskLevel} onChange={set('riskLevel')}>{['low', 'medium', 'high', 'critical'].map((r) => <option key={r}>{r}</option>)}</select></Field>
@@ -140,7 +143,7 @@ export function CategoryModal({ raw, id, onClose, onDone }: { raw?: F; id?: stri
 export function TempPassword({ email, pw, onClose }: { email: string; pw: string; onClose: () => void }) {
   const { toast } = useApp();
   return (
-    <Modal size="sm" title="Temporary password" subtitle={`Share it with ${email} securely — it is shown only once.`} onClose={onClose} footer={<button className="btn btn-primary" onClick={onClose}>Done</button>}>
+    <Modal size="sm" title="Temporary Password" subtitle={`Share it with ${email} securely — it is shown only once.`} onClose={onClose} footer={<button className="btn btn-primary" onClick={onClose}>Done</button>}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <code style={{ flex: 1, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 10, border: '1px solid var(--line)', fontSize: 15 }}><KeyRound size={14} /> {pw}</code>
         <button className="btn" onClick={() => navigator.clipboard?.writeText(pw).then(() => toast('Copied'))}><Copy size={15} /></button>
@@ -165,8 +168,8 @@ export function AdminModal({ raw, id, onClose, onDone }: { raw?: F; id?: string;
   };
   if (pw) return <TempPassword email={f.email} pw={pw} onClose={onClose} />;
   return (
-    <Modal title={id ? 'Edit admin' : 'New admin'} subtitle={id ? undefined : 'A temporary password is generated and shown once.'} onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={busy} onClick={save}>{id ? 'Save' : 'Create admin'}</button></>}>
+    <Modal title={id ? 'Edit Admin' : 'New Admin'} subtitle={id ? undefined : 'A temporary password is generated and shown once.'} onClose={onClose}
+      footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={busy} onClick={save}>{id ? 'Save' : 'Create Admin'}</button></>}>
       <div style={grid}>
         <Field label="Name"><input className="input" value={f.name} onChange={set('name')} autoFocus /></Field>
         <Field label="Email"><input className="input" type="email" value={f.email} onChange={set('email')} /></Field>
@@ -206,7 +209,7 @@ export function SendAlertForm({ onSent }: { onSent: () => void }) {
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span className="chip blue" data-tip="Active users + active agents matching the audience">{est ? `~${est.total.toLocaleString('en-NG')} recipients · ${est.users} users · ${est.agents} agents` : 'Estimating audience…'}</span>
-        <button className="btn btn-primary" disabled={busy || !can('ops')}><Send size={15} /> {busy ? 'Sending…' : 'Send alert'}</button>
+        <button className="btn btn-primary" disabled={busy || !can('ops')}><Send size={15} /> {busy ? 'Sending…' : 'Send Alert'}</button>
       </div>
     </form>
   );

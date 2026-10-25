@@ -5,7 +5,7 @@ It does **not** call the live Homeland system. `apps/api/src/dataport.ts` is a n
 
 | Service | Stack | Network |
 |---|---|---|
-| `web` | Next.js 14 (standalone), recharts, MapLibre GL + OSM | **the only published port** (`WEB_HOST_PORT`, default 3000) |
+| `web` | Next.js 14 (standalone), recharts, MapLibre GL + OSM | **the only published port** (`WEB_HOST_PORT`, default 3131) |
 | `api` | NestJS 10 + Prisma 5, SSE realtime | internal `api:4000` (web proxies `/api/*` to it) |
 | `db` | PostgreSQL 16 (+ `pg_trgm`) | internal, volume `pgdata` |
 | `redis` | Redis 7 (pub/sub for live push, rate limits) | internal, volume `redisdata` |
@@ -17,7 +17,7 @@ Demo controller: `ops@acintel.local` with the same password. All times are shown
 
 ```bash
 cp .env.example .env            # set POSTGRES_PASSWORD (required) and the SEED_ADMIN_* values
-docker compose up -d --build    # http://localhost:3000
+docker compose up -d --build    # http://localhost:3131
 docker compose ps               # all four services should report "healthy"
 ```
 
@@ -38,7 +38,7 @@ For dev, also publish db (5433), redis (6379) and api (4000) and force plain-htt
 3. **Domains:** assign your domain to the **`web`** service only, for example `https://control.example.com:3000`. The `:3000` tells Coolify's proxy which container port to use.
    - Give **no domain to `api`, `db` or `redis`**.
    - The browser only talks to `web`; `web` proxies `/api/*` (including the SSE stream) to `api:4000` over the internal network.
-   - If host port 3000 is already taken on the server, set `WEB_HOST_PORT` to something else or delete the `ports:` line under `web`. Coolify's Traefik routes by domain and does not need the host port.
+   - If host port 3131 is already taken on the server, set `WEB_HOST_PORT` to something else or delete the `ports:` line under `web`. Coolify's Traefik routes by domain and does not need the host port.
 4. **Deploy.** The first build takes about 3–5 min.
    - The API healthcheck allows 60 s for migrate + seed. `web` waits for `api` to be healthy.
    - Then open the domain and log in.
@@ -54,9 +54,15 @@ Realtime note: the SSE route sends `X-Accel-Buffering: no` and `Cache-Control: n
 Set the following and redeploy:
 - `OPENAI_BASE_URL`, for example `https://api.runpod.ai/v2/<endpoint-id>/openai/v1` or a vLLM pod `https://<pod>-8000.proxy.runpod.net/v1`;
 - `OPENAI_API_KEY`;
-- `OPENAI_MODEL`, which must support tool/function calling for counts, filters and CSV exports.
+- `OPENAI_MODEL`: the exact model name the endpoint serves (for RunPod vLLM, the Hugging Face id such as `Qwen/Qwen2.5-7B-Instruct`). If it is wrong, the API picks the first model from `GET /models` and logs a warning.
+- `OPENAI_TIMEOUT_MS` (default `120000`): this allows for serverless cold starts.
+- `OPENAI_MAX_TOKENS` (default `1024`).
 
-Without these, the assistant answers with an offline placeholder and the rest of the app works normally.
+The base URL is normalised. A trailing `/chat/completions` is stripped. A bare `https://api.runpod.ai/v2/<id>` gets `/openai/v1` appended. A missing `/v1` is added. RunPod `IN_QUEUE`/`IN_PROGRESS` jobs are polled until they finish.
+- Tool calling works best. Models without it still answer: the API runs the query itself and asks the model to phrase the result.
+- Provider failures are logged in the API container as `[AI] …` / `AI provider <status>` lines. The user sees a short "please try again" message.
+
+Without these settings, the assistant answers from the built-in query engine and the rest of the app works normally.
 Replies run in the background and arrive over the live stream.
 
 ### Maps

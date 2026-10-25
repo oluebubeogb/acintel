@@ -7,6 +7,8 @@ import { Bus } from './realtime';
 import { opaqueId } from './util';
 import { LGAS } from './geo';
 import { PERIODS, dayKey, fmt, periodLabel, rangeFor } from './lagos';
+import { Msg, aiConfigured, cleanContent, inlineToolCalls, llm, tidyHistory } from './llm';
+import { aiBase } from './llm';
 import { agentRow, alarmRow, incidentRow, userRow, AGENT_COLS, ALARM_COLS, INC_COLS, USER_COLS } from './rows';
 
 /**
@@ -16,7 +18,6 @@ import { agentRow, alarmRow, incidentRow, userRow, AGENT_COLS, ALARM_COLS, INC_C
  */
 type Entity = 'users' | 'agents' | 'incidents' | 'alarms';
 export type Filters = { entity: Entity; lga?: string; status?: string; group?: string; category?: string; type?: string; period?: string; from?: string; to?: string };
-type Msg = { role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string; name?: string };
 
 const TOOL_PARAMS = {
   type: 'object',
@@ -38,27 +39,6 @@ const TOOLS = [
   { type: 'function', function: { name: 'export_csv', description: 'Generate a downloadable CSV of ALL matching records. Use when the user asks for a CSV, export, download or spreadsheet.', parameters: TOOL_PARAMS } },
   { type: 'function', function: { name: 'breakdown', description: 'Group counts by a dimension.', parameters: { ...TOOL_PARAMS, properties: { ...TOOL_PARAMS.properties, by: { type: 'string', enum: ['lga', 'status', 'group', 'category', 'day'] } }, required: ['entity', 'by'] } } },
 ];
-
-async function llm(messages: Msg[], tools = true): Promise<{ ok: true; message: Msg } | { ok: false; error: string; status?: number } | null> {
-  const base = (process.env.OPENAI_BASE_URL || '').replace(/\/$/, '');
-  const key = process.env.OPENAI_API_KEY || '';
-  if (!base || !key) return null;
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), Number(process.env.OPENAI_TIMEOUT_MS || 90000));
-  try {
-    const r = await fetch(`${base}/chat/completions`, {
-      method: 'POST', signal: ctrl.signal, headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-4o-mini', messages, temperature: 0.1, ...(tools ? { tools, tool_choice: 'auto' } : {}) }),
-    });
-    if (!r.ok) return { ok: false, status: r.status, error: `AI provider returned ${r.status}` };
-    const j: any = await r.json();
-    const m = j?.choices?.[0]?.message;
-    if (!m) return { ok: false, error: 'empty reply from provider' };
-    return { ok: true, message: { role: 'assistant', content: m.content ?? null, tool_calls: m.tool_calls } };
-  } catch (e: any) {
-    return { ok: false, error: e?.name === 'AbortError' ? 'AI provider timed out' : `Could not reach AI provider: ${e?.message || e}` };
-  } finally { clearTimeout(t); }
-}
 
 export const toCsv = (cols: { key: string; label: string }[], rows: Record<string, unknown>[]) => {
   const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n\r]/.test(s) || /^[=+\-@]/.test(s) ? `"${(/^[=+\-@]/.test(s) ? "'" : '') + s.replace(/"/g, '""')}"` : s; };
@@ -155,51 +135,94 @@ export class AiController {
     return { tool, filters: { entity, lga, status, group: entity === 'agents' ? group : undefined, category: entity === 'incidents' ? category : undefined, type, period, by } };
   }
 
-  private async offline(text: string, admin: AdminCtx, meta: any): Promise<string> {
+  /** Plain-language summary of a tool result (used offline and when a model replies with tool calls only). */
+  private sayTool(tool: string, f: any, r: any): string {
+    const label = this.describe({ entity: 'agents', ...f });
+    if (!r || r.error) return '';
+    if (tool === 'count_records') return `**${Number(r.count).toLocaleString()}** ${label}.`;
+    if (tool === 'list_records') return r.total ? `Found **${r.total.toLocaleString()}** ${label}${r.total > r.shown ? ` — showing the newest ${r.shown}` : ''}.` : `No ${label} found.`;
+    if (tool === 'export_csv') return r.exported ? `Your CSV of **${r.exported.toLocaleString()}** ${label} is ready.` : `No ${label} found — the CSV is empty.`;
+    if (tool === 'breakdown') return `${label} by **${r.by}** (${Number(r.total).toLocaleString()} total):`;
+    return '';
+  }
+
+  /** Rule-based engine: answers structured questions straight from the database. null = not understood. */
+  private async engine(text: string, admin: AdminCtx, meta: any): Promise<{ text: string; tool: string; filters: any; result: any } | null> {
     const p = await this.parse(text);
-    if (!p) return `I'm running in offline mode (no AI provider configured), so I understand structured questions about **users, agents, reports and alarms**.\n\nTry:\n• "How many Umuahia North agents were onboarded this week?"\n• "List pending users in Aba South"\n• "Export resolved reports this month as CSV"\n• "Panic alarms by LGA last 30 days"\n\nTo enable full AI, set OPENAI_BASE_URL, OPENAI_API_KEY and OPENAI_MODEL (any OpenAI-compatible endpoint, e.g. RunPod vLLM) and restart the API.`;
+    if (!p) return null;
     const r: any = await this.runTool(p.tool, p.filters, admin, meta);
-    const label = this.describe(p.filters);
-    if (p.tool === 'count_records') return `**${r.count.toLocaleString()}** ${label}.`;
-    if (p.tool === 'list_records') return r.total ? `Found **${r.total.toLocaleString()}** ${label}${r.total > r.shown ? ` — showing the newest ${r.shown}` : ''}.` : `No ${label} found.`;
-    if (p.tool === 'export_csv') return r.exported ? `Your CSV of **${r.exported.toLocaleString()}** ${label} is ready.` : `No ${label} found — the CSV would be empty, but here it is anyway.`;
-    return `${label} by **${r.by}** (${r.total.toLocaleString()} total):`;
+    meta.tools.push(p.tool);
+    return { text: this.sayTool(p.tool, p.filters, r), tool: p.tool, filters: p.filters, result: r };
+  }
+
+  private tips() {
+    return `I can answer questions about **users, agents, reports and alarms**. Try:\n• "How many Umuahia North agents were onboarded this week?"\n• "List pending users in Aba South"\n• "Export resolved reports this month as CSV"\n• "Panic alarms by LGA last 30 days"`;
   }
 
   /* ---------- core turn ---------- */
   async answer(sessionId: string, admin: AdminCtx): Promise<{ content: string; meta: any; stub: boolean }> {
     const meta = { exports: [] as any[], tables: [] as any[], tools: [] as string[] };
-    const history = await this.prisma.aiMessage.findMany({ where: { sessionId, status: 'done' }, orderBy: { createdAt: 'asc' }, take: 30 });
+    const history = await this.prisma.aiMessage.findMany({ where: { sessionId, status: 'done' }, orderBy: { createdAt: 'desc' }, take: 30 });
+    history.reverse();
     const last = [...history].reverse().find((m) => m.role === 'user')?.content || '';
+
+    if (!aiConfigured()) {
+      const e = await this.engine(last, admin, meta);
+      return { content: e?.text || this.tips(), meta, stub: true };
+    }
+
     const [groups, cats] = await Promise.all([this.prisma.homelandGroup.findMany({ select: { name: true } }), this.prisma.reportCategory.findMany({ select: { name: true } })]);
     const system = `You are AcIntel Assist for the Abia State Control Room (Abia Homeland Security). Today is ${fmt(new Date())} (Africa/Lagos). ` +
       `Always use tools to answer questions about numbers, lists or exports — never invent figures. "Onboarded"/"registered"/"joined" = created date. ` +
       `"This week" = this_week (Monday start). Agent groups: ${groups.map((g) => g.name).join(', ')}. Incident categories: ${cats.map((c) => c.name).join(', ')}. ` +
       `When you create a CSV, say it's ready; the link is rendered automatically. Be concise and operational; use **bold** for key numbers.`;
-    const msgs: Msg[] = [{ role: 'system', content: system }, ...history.map((m) => ({ role: m.role, content: m.content }))];
+    const msgs: Msg[] = [{ role: 'system', content: system }, ...tidyHistory(history)];
+    const known = TOOLS.map((t) => t.function.name);
+    const results: { tool: string; args: any; out: any }[] = [];
+    const synth = () => results.map((r) => this.sayTool(r.tool, r.args, r.out)).filter(Boolean).join('\n\n');
+
+    /** Provider failed: get the data ourselves, then let the model phrase it without tools (or phrase it ourselves). */
+    const recover = async (why: string) => {
+      console.warn(`[AI] recovering without tools: ${why}`);
+      if (results.length) return synth() || 'Done.';
+      const e = await this.engine(last, admin, meta);
+      const plain = await llm([...msgs.filter((m) => m.role !== 'tool' && !m.tool_calls),
+        ...(e ? [{ role: 'user', content: `Database result for my last question (already computed — do not call tools): ${JSON.stringify(e.result).slice(0, 6000)}. Answer my question concisely using these exact numbers.` }] : [])]);
+      const text = plain?.ok ? cleanContent(plain.message.content) : '';
+      if (text) return text;
+      if (e?.text) return e.text;
+      console.warn(`[AI] no answer possible: ${plain && !plain.ok ? plain.error : 'empty content'}`);
+      return `I couldn't get an answer from the AI model just now — please try again in a moment.`;
+    };
+
     for (let round = 0; round < 5; round++) {
-      const r = await llm(msgs);
-      if (r === null) return { content: await this.offline(last, admin, meta), meta, stub: true };
-      if (!r.ok) {
-        // Provider without tool support (400/422) → answer via the offline engine instead of failing.
-        const fallback = await this.offline(last, admin, meta);
-        return { content: `${fallback}\n\n_⚠️ ${r.error}; answered with the built-in query engine._`, meta, stub: false };
-      }
+      const r = await llm(msgs, TOOLS);
+      if (!r) return { content: await recover('not configured'), meta, stub: true };
+      if (!r.ok) return { content: await recover(r.error), meta, stub: false };
       const m = r.message;
-      if (!m.tool_calls?.length) return { content: m.content || '(empty reply)', meta, stub: false };
-      msgs.push({ role: 'assistant', content: m.content || null, tool_calls: m.tool_calls });
-      for (const tc of m.tool_calls) {
+      let content = cleanContent(m.content);
+      let calls = m.tool_calls || [];
+      if (!calls.length && content) { const ic = inlineToolCalls(content, known); if (ic.calls.length) { calls = ic.calls; content = ic.rest; } }
+      if (!calls.length) {
+        if (content) return { content, meta, stub: false };
+        // Empty reply: phrase tool results ourselves, or retry once without tools, then fall back to the engine.
+        if (results.length) return { content: synth() || 'Done.', meta, stub: false };
+        return { content: await recover('empty reply'), meta, stub: false };
+      }
+      msgs.push({ role: 'assistant', content: content || null, tool_calls: calls.map((c: any, i: number) => ({ id: c.id || `call_${round}_${i}`, type: 'function', function: { name: c.function?.name, arguments: typeof c.function?.arguments === 'string' ? c.function.arguments : JSON.stringify(c.function?.arguments || {}) } })) });
+      for (const tc of msgs[msgs.length - 1].tool_calls!) {
         let args: any = {}; try { args = JSON.parse(tc.function?.arguments || '{}'); } catch { /* */ }
         meta.tools.push(tc.function?.name);
         const out = await this.runTool(tc.function?.name, args, admin, meta).catch((e) => ({ error: String(e?.message || e) }));
+        results.push({ tool: tc.function?.name, args, out });
         msgs.push({ role: 'tool', tool_call_id: tc.id, name: tc.function?.name, content: JSON.stringify(out).slice(0, 12000) });
       }
     }
-    return { content: 'I ran out of tool steps for this question — try narrowing it down.', meta, stub: false };
+    return { content: synth() || 'I ran out of tool steps for this question — try narrowing it down.', meta, stub: false };
   }
 
   @Get('status')
-  status() { return { configured: !!(process.env.OPENAI_BASE_URL && process.env.OPENAI_API_KEY), model: process.env.OPENAI_MODEL || 'gpt-4o-mini', tools: TOOLS.map((t) => t.function.name), background: true }; }
+  status() { return { configured: aiConfigured(), model: process.env.OPENAI_MODEL || 'gpt-4o-mini', base: aiBase(), tools: TOOLS.map((t) => t.function.name), background: true }; }
 
   @Get('sessions')
   sessions(@CurrentAdmin() admin: AdminCtx) {
@@ -242,8 +265,10 @@ export class AiController {
         await this.prisma.aiMessage.update({ where: { id: pending.id }, data: { content: r.content, status: 'done', meta: { ...r.meta, stub: r.stub } as Prisma.InputJsonValue } });
         return r;
       } catch (e: any) {
-        await this.prisma.aiMessage.update({ where: { id: pending.id }, data: { content: `⚠️ ${e?.message || 'AI error'}`, status: 'error' } });
-        return { content: `⚠️ ${e?.message || 'AI error'}`, meta: {}, stub: false };
+        console.warn(`[AI] turn failed: ${e?.message || e}`);
+        const content = `I couldn't get an answer just now — please try again in a moment.`;
+        await this.prisma.aiMessage.update({ where: { id: pending.id }, data: { content, status: 'error' } });
+        return { content, meta: {}, stub: false };
       } finally {
         await this.prisma.aiSession.update({ where: { id: sid }, data: { updatedAt: new Date() } }).catch(() => undefined);
         this.bus.publish({ type: 'ai.done', adminId: admin.id, sessionId: sid, messageId: pending.id });

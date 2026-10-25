@@ -1,8 +1,8 @@
 'use client';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
-import { Bell, BarChart3, ChevronRight, LayoutDashboard, LogOut, Menu, ScrollText, Settings, ShieldHalf, UserRound } from 'lucide-react';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { Bell, BarChart3, LayoutDashboard, LogOut, Menu, ScrollText, Settings, ShieldHalf, UserRound } from 'lucide-react';
 import { DayOverlay } from './overlays';
 import { NAV, parentForPath } from '@/lib/nav';
 import { api } from '@/lib/api';
@@ -39,53 +39,77 @@ function UserMenu() {
       {open && (
         <div className="menu" role="menu">
           <div className="menu-head"><b style={{ fontSize: 13 }}>{me?.name}</b><div className="hint">{me?.email}</div><span className="chip blue" style={{ marginTop: 6 }}>{me?.role}</span></div>
-          {me && <Link className="menu-item" href={`/e/${me.publicId}`} onClick={() => setOpen(false)}><UserRound size={16} /> My profile</Link>}
+          {me && <Link className="menu-item" href={`/e/${me.publicId}`} onClick={() => setOpen(false)}><UserRound size={16} /> My Profile</Link>}
           <Link className="menu-item" href="/settings" onClick={() => setOpen(false)}><Settings size={16} /> Settings</Link>
-          <button className="menu-item" onClick={logout} style={{ color: 'var(--rose)' }}><LogOut size={16} /> Log out</button>
+          <button className="menu-item" onClick={logout} style={{ color: 'var(--rose)' }}><LogOut size={16} /> Log Out</button>
         </div>
       )}
     </div>
   );
 }
 
+/** Number of columns the nav grid currently renders (read from CSS so breakpoints live in one place). */
+function useGridCols(ref: React.RefObject<HTMLDivElement>) {
+  const [cols, setCols] = useState(2);
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    const read = () => { const t = getComputedStyle(el).gridTemplateColumns; const n = t && t !== 'none' ? t.split(' ').filter(Boolean).length : 2; setCols(Math.max(1, n)); };
+    read();
+    const ro = new ResizeObserver(read); ro.observe(el);
+    window.addEventListener('resize', read);
+    return () => { ro.disconnect(); window.removeEventListener('resize', read); };
+  }, [ref]);
+  return cols;
+}
+
 function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
   const path = usePathname();
-  const { counts, can, live } = useApp();
+  const { counts, can } = useApp();
   const [active, setActive] = useState<string>(parentForPath(path) || 'reports');
   useEffect(() => { const p = parentForPath(path); if (p) setActive(p); }, [path]);
-  const parent = NAV.find((n) => n.key === active)!;
+  const gridRef = useRef<HTMLDivElement>(null);
+  const cols = useGridCols(gridRef);
+  const parent = NAV.find((n) => n.key === active);
+  const idx = parent ? NAV.indexOf(parent) : -1;
+  // The pane sits directly under the row that holds the clicked tile.
+  const after = idx < 0 ? -1 : Math.min(NAV.length - 1, Math.floor(idx / cols) * cols + cols - 1);
+  const pane = parent && (
+    <div className="panel" key={`pane-${parent.key}`}>
+      <div className="panel-head"><b>{parent.full}</b></div>
+      <ul className="stripe-list">
+        {parent.children.map((c, i) => (
+          <li key={c.key}>
+            <Link href={c.href} className={path === c.href ? 'current' : ''} style={{ animationDelay: `${i * 25}ms` }} onClick={onNavigate} title={c.full}>
+              <span>{c.label}</span>
+              <CountBadge n={counts.targets[c.key]} />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
   return (
     <aside className={`sidebar ${open ? 'open' : ''}`} aria-label="Main navigation">
-      <div className="side-label"><span>Control room</span><span className="live-dot" style={live === 'live' ? undefined : { background: '#f59e0b', boxShadow: 'none' }} data-tip={live === 'live' ? 'Live — realtime stream connected' : 'Reconnecting… badges refresh by polling'} data-tip-pos="left" /></div>
-      <div className="nav-grid">
-        {NAV.map((n) => {
+      <div className="side-label"><span>Control Room</span></div>
+      <div className="nav-grid" ref={gridRef}>
+        {NAV.map((n, i) => {
           const Icon = NAV_ICONS[n.icon];
           return (
-            <button key={n.key} className={`tile tone-${n.tone} ${active === n.key ? 'active' : ''}`} onClick={() => setActive(n.key)} data-tip={n.full} aria-pressed={active === n.key}>
-              <span className="ico"><Icon size={20} strokeWidth={2} /></span>
-              <span className="t-label">{n.short}</span>
-              <CountBadge n={counts.parents[n.key]} />
-            </button>
+            <Fragment key={n.key}>
+              <button className={`tile tone-${n.tone} ${active === n.key ? 'active' : ''}`} onClick={() => setActive((a) => (a === n.key ? '' : n.key))} data-tip={n.full} aria-pressed={active === n.key} aria-expanded={active === n.key}>
+                <span className="ico"><Icon size={20} strokeWidth={2} /></span>
+                <span className="t-label">{n.short}</span>
+                <CountBadge n={counts.parents[n.key]} />
+              </button>
+              {i === after && pane}
+            </Fragment>
           );
         })}
-      </div>
-      <div className="panel" key={parent.key}>
-        <div className="panel-head"><div><b>{parent.full}</b><small>{parent.children.length} {parent.children.length === 1 ? 'page' : 'pages'}</small></div></div>
-        <ul className="stripe-list">
-          {parent.children.map((c, i) => (
-            <li key={c.key}>
-              <Link href={c.href} className={path === c.href ? 'current' : ''} style={{ animationDelay: `${i * 25}ms` }} onClick={onNavigate} title={c.full}>
-                <span>{c.label}</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><CountBadge n={counts.targets[c.key]} /><ChevronRight size={14} color="var(--faint)" /></span>
-              </Link>
-            </li>
-          ))}
-        </ul>
       </div>
       <div className="side-foot">
         <Link href="/" className={`side-link ${path === '/' ? 'current' : ''}`} onClick={onNavigate}><LayoutDashboard size={16} /> Dashboard</Link>
         <Link href="/reports/analytics" className={`side-link ${path === '/reports/analytics' ? 'current' : ''}`} onClick={onNavigate}><BarChart3 size={16} /> Analytics</Link>
-        {can('audit.view') && <Link href="/audit" className={`side-link ${path === '/audit' ? 'current' : ''}`} onClick={onNavigate}><ScrollText size={16} /> Audit log</Link>}
+        {can('audit.view') && <Link href="/audit" className={`side-link ${path === '/audit' ? 'current' : ''}`} onClick={onNavigate}><ScrollText size={16} /> Audit Log</Link>}
         <Link href="/settings" className={`side-link ${path === '/settings' ? 'current' : ''}`} onClick={onNavigate}><Settings size={16} /> Settings</Link>
       </div>
     </aside>
@@ -110,12 +134,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <GlobalSearch />
         <div className="top-spacer" />
         <LagosClock />
-        <Link href="/alerts" className="icon-btn" data-tip="Alerts & notifications" data-tip-pos="bottom" aria-label="Alerts">
-          <Bell size={19} />
-          {counts.total > 0 && <span style={{ position: 'absolute', top: 2, right: 0 }}><CountBadge n={counts.total} /></span>}
-        </Link>
-        <Link href="/settings" className="icon-btn" data-tip="Settings" data-tip-pos="bottom" aria-label="Settings"><Settings size={19} /></Link>
-        <UserMenu />
+        <div className="top-actions">
+          <Link href="/alerts" className="icon-btn bell" data-tip="Alerts & Notifications" data-tip-pos="bottom" aria-label="Alerts">
+            <Bell size={19} />
+            {counts.total > 0 && <CountBadge n={counts.total} />}
+          </Link>
+          <Link href="/settings" className="icon-btn" data-tip="Settings" data-tip-pos="bottom" aria-label="Settings"><Settings size={19} /></Link>
+          <UserMenu />
+        </div>
       </header>
       {mobileOpen && <div className="scrim" onClick={() => setMobileOpen(false)} />}
       <Sidebar open={mobileOpen} onNavigate={() => setMobileOpen(false)} />
@@ -126,14 +152,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function PageHead({ crumbs, title, subtitle, actions }: { crumbs?: { label: string; href?: string }[]; title: string; subtitle?: string; actions?: React.ReactNode }) {
+/** Page header: title + actions only (crumbs/subtitle props are accepted for compatibility but no longer rendered). */
+export function PageHead({ title, actions }: { crumbs?: { label: string; href?: string }[]; title: string; subtitle?: string; actions?: React.ReactNode }) {
   return (
     <div className="page-head">
-      <div>
-        {crumbs && <div className="crumbs">{crumbs.map((c, i) => <span key={i} style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>{i > 0 && <ChevronRight size={12} />}{c.href ? <Link href={c.href}>{c.label}</Link> : c.label}</span>)}</div>}
-        <h1 className="title">{title}</h1>
-        {subtitle && <p className="subtitle">{subtitle}</p>}
-      </div>
+      <h1 className="title">{title}</h1>
       {actions && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{actions}</div>}
     </div>
   );

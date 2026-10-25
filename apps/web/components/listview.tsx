@@ -17,7 +17,7 @@ const LINK_OVERRIDE: Record<string, string> = { 'users.devices': 'label' };
 const IMPORT: Record<string, string> = { 'users.active': 'users', 'users.pending': 'users', 'users.generate': 'users', 'agents.active': 'agents', 'agents.unassigned': 'agents', 'agents.groups': 'groups', 'reports.categories': 'categories' };
 const NO_TABLE = new Set(['agents.new', 'reports.analytics']);
 const LIVE_KEYS: Record<string, string[]> = { users: ['users'], agents: ['agents', 'groups', 'admins'], reports: ['incidents', 'categories'], alarms: ['alarms'], tips: ['alerts'] };
-const PERIODS = [['all', 'All time'], ['today', 'Today'], ['yesterday', 'Yesterday'], ['this_week', 'This week'], ['last_7_days', 'Last 7 days'], ['this_month', 'This month'], ['last_30_days', 'Last 30 days'], ['last_90_days', 'Last 90 days'], ['this_year', 'This year'], ['custom', 'Custom range…']];
+const PERIODS = [['all', 'All Time'], ['today', 'Today'], ['yesterday', 'Yesterday'], ['this_week', 'This Week'], ['last_7_days', 'Last 7 Days'], ['this_month', 'This Month'], ['last_30_days', 'Last 30 Days'], ['last_90_days', 'Last 90 Days'], ['this_year', 'This Year'], ['custom', 'Custom Range…']];
 type Data = { columns: Col[]; rows: Row[]; total: number };
 type Filt = { lga: string; status: string; group: string; category: string; period: string; from: string; to: string };
 
@@ -42,7 +42,7 @@ function FilterBar({ keys, f, setF, statusOpts }: { keys: (keyof Filt)[]; f: Fil
     <div className="filters card">
       {keys.includes('status') && <label data-tip="Filter by status"><span>Status</span><select className="select" value={f.status} onChange={s('status')}>{['All', ...statusOpts].map((x) => <option key={x}>{x}</option>)}</select></label>}
       {keys.includes('lga') && <label data-tip="Filter by local government area"><span>LGA</span><select className="select" value={f.lga} onChange={s('lga')}>{['All', ...LGAS].map((x) => <option key={x}>{x}</option>)}</select></label>}
-      {keys.includes('group') && <label data-tip="Filter by Homeland group"><span>Group</span><select className="select" value={f.group} onChange={s('group')}><option value="">All groups</option><option value="none">Un-assigned</option>{groups.map((g) => <option key={g.publicId} value={g.publicId}>{g.name}</option>)}</select></label>}
+      {keys.includes('group') && <label data-tip="Filter by Homeland group"><span>Group</span><select className="select" value={f.group} onChange={s('group')}><option value="">All Groups</option><option value="none">Un-assigned</option>{groups.map((g) => <option key={g.publicId} value={g.publicId}>{g.name}</option>)}</select></label>}
       {keys.includes('category') && <label data-tip="Filter by report category"><span>Category</span><select className="select" value={f.category} onChange={s('category')}>{['All', ...cats].map((x) => <option key={x}>{x}</option>)}</select></label>}
       {keys.includes('period') && <label data-tip="Registration / report date (Africa/Lagos)"><span>Period</span><select className="select" value={f.period} onChange={s('period')}>{PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>}
       {keys.includes('period') && f.period === 'custom' && <><label><span>From</span><input type="date" className="input" value={f.from} onChange={s('from')} /></label><label><span>To</span><input type="date" className="input" value={f.to} onChange={s('to')} /></label></>}
@@ -141,7 +141,7 @@ export function ListView({ section, child }: { section: string; child: string })
       actions = (r) => <B tone="btn-success" icon={<UserCheck size={13} />} label="Activate" tip="Re-activate agent" onClick={() => setStatus('agents', [r._id!], 'active', 'Activate')} />;
       bulk = (ids, c) => <><B tone="btn-success" icon={<UserCheck size={13} />} label="Activate" onClick={() => setStatus('agents', ids, 'active', 'Activate', c)} /><B icon={<Users size={13} />} label="Assign / remove group" onClick={() => setAssign({ ids, clear: c })} /></>; break;
     case 'agents.groups':
-      toolbar = <B tone="btn-primary" icon={<Plus size={14} />} label="New group" onClick={() => setModal({ kind: 'group' })} />;
+      toolbar = <B tone="btn-primary" icon={<Plus size={14} />} label="New Group" onClick={() => setModal({ kind: 'group' })} />;
       actions = (r) => <span className="row-acts"><B icon={<Pencil size={13} />} tip="Edit group" onClick={() => setModal({ kind: 'group', row: r })} /><B tone="btn-danger" icon={<Trash2 size={13} />} tip="Delete group" onClick={() => del(`/groups/${r._id}`, `group “${r.name}”`, `Its ${r.agents} agent(s) become un-assigned. This cannot be undone.`)} /></span>; break;
     case 'agents.admins': {
       const am = can('admins.manage');
@@ -152,14 +152,14 @@ export function ListView({ section, child }: { section: string; child: string })
         <button className="btn btn-sm btn-danger" disabled={!am} onClick={() => del(`/admins/${r._id}`, `admin ${r.email}`)} data-tip="Delete admin"><Trash2 size={13} /></button></span>; break;
     }
     case 'reports.categories':
-      toolbar = <B tone="btn-primary" icon={<Plus size={14} />} label="New category" onClick={() => setModal({ kind: 'category' })} />;
+      toolbar = <B tone="btn-primary" icon={<Plus size={14} />} label="New Category" onClick={() => setModal({ kind: 'category' })} />;
       actions = (r) => <span className="row-acts"><B icon={<Pencil size={13} />} tip="Edit risk, agent count, status" onClick={() => setModal({ kind: 'category', row: r })} /><B tone="btn-danger" icon={<Trash2 size={13} />} tip={r.reports ? 'In use — set inactive instead' : 'Delete category'} onClick={() => del(`/categories/${r._id}`, `category “${r.name}”`)} /></span>; break;
     case 'reports.new':
       actions = (r) => <span className="row-acts"><B tone="btn-primary" icon={<Send size={13} />} label="Dispatch" tip="Choose agencies and dispatch" onClick={() => setDispatching(r)} /><B tone="btn-danger" icon={<XCircle size={13} />} tip="Mark as fake" onClick={() => incStatus([r._id!], 'fake')} /></span>;
-      bulk = (ids, c) => <><B icon={<ShieldCheck size={13} />} label="Acted upon" onClick={() => incStatus(ids, 'acted', c)} /><B tone="btn-success" icon={<CheckCircle2 size={13} />} label="Resolve" onClick={() => incStatus(ids, 'resolved', c)} /><B tone="btn-danger" icon={<XCircle size={13} />} label="Fake" onClick={() => incStatus(ids, 'fake', c)} /></>; break;
+      bulk = (ids, c) => <><B icon={<ShieldCheck size={13} />} label="Acted Upon" onClick={() => incStatus(ids, 'acted', c)} /><B tone="btn-success" icon={<CheckCircle2 size={13} />} label="Resolve" onClick={() => incStatus(ids, 'resolved', c)} /><B tone="btn-danger" icon={<XCircle size={13} />} label="Fake" onClick={() => incStatus(ids, 'fake', c)} /></>; break;
     case 'reports.dispatched': case 'reports.acted': case 'reports.map':
       actions = (r) => <span className="row-acts">{r.status === 'new' && <B tone="btn-primary" icon={<Send size={13} />} tip="Dispatch" onClick={() => setDispatching(r)} />}{r.status === 'dispatched' && <B icon={<ShieldCheck size={13} />} tip="Mark acted upon" onClick={() => incStatus([r._id!], 'acted')} />}<B tone="btn-success" icon={<CheckCircle2 size={13} />} label="Resolve" tip="Resolve report" onClick={() => incStatus([r._id!], 'resolved')} /><B tone="btn-danger" icon={<XCircle size={13} />} tip="Mark as fake" onClick={() => incStatus([r._id!], 'fake')} /></span>;
-      bulk = (ids, c) => <>{key === 'reports.dispatched' && <B icon={<ShieldCheck size={13} />} label="Acted upon" onClick={() => incStatus(ids, 'acted', c)} />}<B tone="btn-success" icon={<CheckCircle2 size={13} />} label="Resolve" onClick={() => incStatus(ids, 'resolved', c)} /><B tone="btn-danger" icon={<XCircle size={13} />} label="Fake" onClick={() => incStatus(ids, 'fake', c)} /></>; break;
+      bulk = (ids, c) => <>{key === 'reports.dispatched' && <B icon={<ShieldCheck size={13} />} label="Acted Upon" onClick={() => incStatus(ids, 'acted', c)} />}<B tone="btn-success" icon={<CheckCircle2 size={13} />} label="Resolve" onClick={() => incStatus(ids, 'resolved', c)} /><B tone="btn-danger" icon={<XCircle size={13} />} label="Fake" onClick={() => incStatus(ids, 'fake', c)} /></>; break;
     case 'alarms.new': case 'alarms.duress': case 'alarms.panic':
       actions = (r) => r.status === 'new' ? <B tone="btn-success" icon={<CheckCircle2 size={13} />} label="Resolve" tip="Mark alarm handled" onClick={() => resolveAlarms([r._id!])} /> : <span className="chip green">handled</span>;
       bulk = (ids, c) => <B tone="btn-success" icon={<CheckCircle2 size={13} />} label="Resolve" onClick={() => resolveAlarms(ids, c)} />; break;
@@ -167,7 +167,7 @@ export function ListView({ section, child }: { section: string; child: string })
       actions = (r) => <B tone="btn-danger" icon={<Trash2 size={13} />} tip="Delete alert" onClick={() => del(`/alerts/${r._id}`, 'security alert')} />; break;
   }
 
-  const statusOpts = section === 'alarms' ? ['new', 'resolved'] : ['active', 'pending', 'suspended'];
+  const statusOpts = key === 'alarms.duress' || key === 'alarms.panic' ? ['resolved'] : section === 'alarms' ? ['new', 'resolved'] : ['active', 'pending', 'suspended'];
   const subtitle = key === 'agents.new' ? 'Onboard a new local agent — or import many from CSV'
     : key === 'reports.analytics' ? 'Totals, charts and a CSV pack over any date range (Africa/Lagos)'
     : key === 'users.generate' ? 'Filter by status, LGA and period, then export the list as CSV'

@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CalendarDays, Check, Download, ExternalLink, Send } from 'lucide-react';
-import { api, downloadCsv } from '@/lib/api';
+import { api, downloadCsv, titleCase } from '@/lib/api';
 import { useApp } from './providers';
 import { Cell, Col, Modal, Row } from './ui';
 
@@ -36,19 +36,19 @@ export function DispatchOverlay({ report, onClose, onDone }: { report: Row; onCl
   };
   const allOn = picked.length === agencies.length;
   return (
-    <Modal title="Dispatch incident" subtitle="Select the agencies to notify, then Dispatch Now." onClose={onClose}
+    <Modal title="Dispatch Incident" subtitle="Select the agencies to notify, then Dispatch Now." onClose={onClose}
       footer={<>
         <span className="hint" style={{ marginRight: 'auto', alignSelf: 'center' }}>{picked.length ? `${picked.length} selected` : 'No agency selected'}</span>
-        <button className="btn" onClick={() => setPicked(allOn ? [] : agencies)}>{allOn ? 'Clear all' : 'Select all'}</button>
+        <button className="btn" onClick={() => setPicked(allOn ? [] : agencies)}>{allOn ? 'Clear All' : 'Select All'}</button>
         <button className="btn btn-primary" disabled={!picked.length || busy || !can('ops')} onClick={dispatch} data-tip={can('ops') ? 'Send to the selected agencies' : 'Your role is read-only'}><Send size={15} /> {busy ? 'Dispatching…' : 'Dispatch Now'}</button>
       </>}>
       <div className="summary">
         <div><small>Category</small><b>{report.category}</b></div>
-        <div><small>Report date</small><b>{report.date}</b></div>
+        <div><small>Report Date</small><b>{report.date}</b></div>
         <div style={{ gridColumn: '1 / -1' }}><small>Report</small><b>{report.details}</b></div>
         <div style={{ gridColumn: '1 / -1' }}><small>Location</small><b>{report.location}</b></div>
-        {report.sendAgentCount != null && <div><small>Recommended agents</small><b>{report.sendAgentCount} (category policy)</b></div>}
-        {already.length > 0 && <div><small>Already dispatched to</small><b>{already.join(', ')}</b></div>}
+        {report.sendAgentCount != null && <div><small>Recommended Agents</small><b>{report.sendAgentCount} (category policy)</b></div>}
+        {already.length > 0 && <div><small>Already Dispatched To</small><b>{already.join(', ')}</b></div>}
       </div>
       {err && <div className="chip rose" style={{ height: 'auto', padding: '8px 10px', marginBottom: 12, display: 'flex' }}><AlertTriangle size={14} /> {err}</div>}
       <div className="label" style={{ marginBottom: 10 }}>Agencies</div>
@@ -59,7 +59,7 @@ export function DispatchOverlay({ report, onClose, onDone }: { report: Row; onCl
           </button>
         ))}
       </div>
-      <div className="field" style={{ marginTop: 14, marginBottom: 0 }}><label className="label">Note for the log (optional)</label>
+      <div className="field" style={{ marginTop: 14, marginBottom: 0 }}><label className="label">Note For The Log (Optional)</label>
         <input className="input" maxLength={500} placeholder="e.g. Caller confirmed 3 armed men, Ariaria junction" value={note} onChange={(e) => setNote(e.target.value)} /></div>
     </Modal>
   );
@@ -70,7 +70,7 @@ function MiniTable({ columns, rows, linkKey, max = 50 }: { columns: Col[]; rows:
   if (!rows.length) return <div className="hint" style={{ padding: 14 }}>Nothing recorded.</div>;
   return (
     <div style={{ border: '1px solid var(--line)', borderRadius: 12, overflow: 'hidden' }}>
-      <div className="table-wrap" style={{ maxHeight: 360 }}>
+      <div className="table-wrap scroll" style={{ maxHeight: 360 }}>
         <table className="dt">
           <thead><tr>{columns.map((c) => <th key={c.key} style={{ cursor: 'default' }}>{c.label}</th>)}</tr></thead>
           <tbody>{rows.slice(0, max).map((r, i) => <tr key={r._id || i}>{columns.map((c) => <td key={c.key} className={c.key === lk ? 'primary' : ''}><Cell col={c} row={r} linkKey={lk} /></td>)}</tr>)}</tbody>
@@ -83,20 +83,26 @@ function MiniTable({ columns, rows, linkKey, max = 50 }: { columns: Col[]; rows:
 
 const LK: Record<string, string> = { users: 'name', agents: 'name', reports: 'category', alarms: 'sender', tips: 'title' };
 /** KPI drill-down: overlay first (fast), "Open as page" for the full table, CSV exports the full list. */
-export function DrillOverlay({ kind, title, href, onClose, linkKey }: { kind: string; title: string; href: string; onClose: () => void; linkKey?: string }) {
+/** Link to the generic records page for any list kind + server filters ("Open as page"). */
+export const recordsHref = (kind: string, query?: Record<string, string>, title?: string) =>
+  `/records?${new URLSearchParams({ kind, ...(title ? { title } : {}), ...(query || {}) })}`;
+
+export function DrillOverlay({ kind, title, href, query, onClose, linkKey }: { kind: string; title: string; href?: string; query?: Record<string, string>; onClose: () => void; linkKey?: string }) {
   const [data, setData] = useState<{ columns: Col[]; rows: Row[]; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { api(`/records/${kind}?take=200`).then(setData).catch(() => setData({ columns: [], rows: [], total: 0 })); }, [kind]);
+  const qs = new URLSearchParams(query || {}).toString();
+  useEffect(() => { api(`/records/${kind}?take=200${qs ? `&${qs}` : ''}`).then(setData).catch(() => setData({ columns: [], rows: [], total: 0 })); }, [kind, qs]);
   const cols = data?.columns.slice(0, 6) || [];
   const csv = async () => {
     if (!data) return; setBusy(true);
-    try { const all = data.total > data.rows.length ? await api<typeof data>(`/records/${kind}?take=10000`) : data; downloadCsv(kind.replace('.', '-'), all.columns, all.rows); } finally { setBusy(false); }
+    try { const all = data.total > data.rows.length ? await api<typeof data>(`/records/${kind}?take=10000${qs ? `&${qs}` : ''}`) : data; downloadCsv(`${kind.replace('.', '-')}${qs ? '-filtered' : ''}`, all.columns, all.rows); } finally { setBusy(false); }
   };
+  const page = href || recordsHref(kind, query, title);
   return (
-    <Modal title={title} subtitle={data ? `${data.total.toLocaleString('en-NG')} record${data.total === 1 ? '' : 's'}` : 'Loading…'} onClose={onClose}
+    <Modal title={titleCase(title)} subtitle={data ? `${data.total.toLocaleString('en-NG')} record${data.total === 1 ? '' : 's'}` : 'Loading…'} onClose={onClose}
       footer={<>
         <button className="btn" disabled={!data || busy} onClick={csv}><Download size={15} /> {busy ? 'Preparing…' : 'Export CSV'}</button>
-        <Link className="btn btn-primary" href={href} onClick={onClose}><ExternalLink size={15} /> Open as page</Link>
+        <Link className="btn btn-primary" href={page} onClick={onClose}><ExternalLink size={15} /> Open as Page</Link>
       </>}>
       {!data ? <div style={{ display: 'grid', gap: 10 }}>{[80, 60, 70, 50].map((w) => <div key={w} className="skeleton" style={{ width: `${w}%` }} />)}</div>
         : <MiniTable columns={cols} rows={data.rows} linkKey={linkKey || LK[kind.split('.')[0]]} />}
@@ -109,14 +115,14 @@ export function DayOverlay({ date, entity, onClose }: { date: string; entity?: s
   const [d, setD] = useState<any>(null);
   const [tab, setTab] = useState('incidents');
   useEffect(() => { api(`/engagement?date=${date}${entity ? `&entity=${entity}` : ''}`).then(setD).catch(() => setD({ error: true })); }, [date, entity]);
-  const tabs = [['incidents', 'Reports'], ['alarms', 'Alarms'], ['users', 'New users'], ['agents', 'New agents'], ['audit', 'Admin actions']] as const;
+  const tabs = [['incidents', 'Reports'], ['alarms', 'Alarms'], ['users', 'New Users'], ['agents', 'New Agents'], ['audit', 'Admin Actions']] as const;
   return (
     <Modal title={d?.label || date} subtitle="Engagement for the day · Africa/Lagos" onClose={onClose}
       footer={d?.lists ? <button className="btn" onClick={() => downloadCsv(`engagement-${date}-${tab}`, d.lists[tab].columns, d.lists[tab].rows)}><Download size={15} /> Export {tab} CSV</button> : undefined}>
       {!d ? <div className="skeleton" style={{ width: '60%' }} /> : d.error ? <div className="hint">Could not load this day.</div> : (
         <>
           <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))' }}>
-            {[['Reports', d.counts.incidents], ['Alarms', d.counts.alarms], ['New users', d.counts.users], ['User logins', d.counts.userLogins], ['New agents', d.counts.agents], ['Dispatches', d.counts.dispatches], ['Admin actions', d.counts.actions]].map(([l, v]) => (
+            {[['Reports', d.counts.incidents], ['Alarms', d.counts.alarms], ['New Users', d.counts.users], ['User Logins', d.counts.userLogins], ['New Agents', d.counts.agents], ['Dispatches', d.counts.dispatches], ['Admin Actions', d.counts.actions]].map(([l, v]) => (
               <div key={l} className="card stat"><small>{l}</small><b>{v}</b></div>))}
           </div>
           {d.focus && (

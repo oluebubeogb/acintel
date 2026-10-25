@@ -29,7 +29,7 @@ const dayOf = (ts: string | Date) => new Intl.DateTimeFormat('en-CA', { timeZone
 export function Cell({ col, row, linkKey }: { col: Col; row: Row; linkKey?: string }) {
   const { openDay } = useApp();
   const v = row[col.key];
-  if (CHIP_KEYS.has(col.key) && typeof v === 'string' && v) return <span className={`chip ${STATUS_TONE[v] || ''}`}><span className="dot" />{v.replace('_', ' ')}</span>;
+  if (CHIP_KEYS.has(col.key) && typeof v === 'string' && v) return <span className={`chip ${STATUS_TONE[v] || ''}`}>{v.replace(/_/g, ' ')}</span>;
   if (col.key === linkKey && row._id) return <Link href={`/e/${row._id}`} data-tip="Open record">{String(v ?? '')}</Link>;
   const href = row._links?.[col.key];
   if (href && v) return <Link className="cell-link" href={href} data-tip="Open">{String(v)}</Link>;
@@ -96,11 +96,13 @@ export function PageSizeControl({ value, onChange }: { value: number; onChange: 
   );
 }
 
-export function DataTable({ columns, rows, loading, exportName, linkKey, actions, importKind, onImported, total, toolbar, bulk }: {
+export function DataTable({ columns, rows, loading, exportName, linkKey, actions, importKind, onImported, total, toolbar, bulk, scroll }: {
   columns: Col[]; rows: Row[]; loading?: boolean; exportName: string; linkKey?: string; total?: number;
   actions?: (row: Row) => React.ReactNode; importKind?: string; onImported?: () => void; toolbar?: React.ReactNode;
   /** Bulk actions for marked rows. Return buttons; call clear() after a successful action. */
   bulk?: (ids: string[], clear: () => void) => React.ReactNode;
+  /** Inner scroll with a max height — only for pages/overlays that stack several tables. Single-table pages paginate instead. */
+  scroll?: boolean;
 }) {
   const { pageSize } = useApp();
   const [importing, setImporting] = useState(false);
@@ -133,13 +135,13 @@ export function DataTable({ columns, rows, loading, exportName, linkKey, actions
   const exportRows = marked.size ? filtered.filter((r, i) => marked.has(rowId(r, i))) : filtered;
 
   return (
-    <div className="card" style={{ overflow: 'hidden' }}>
+    <div className="card dt-card">
       <div className="table-tools">
         <div className="search-mini"><Search size={15} /><input className="input" placeholder="Search this table…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }} data-tip="Filter by column">
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }} data-tip="Filter by column" data-tip-pos="bottom">
           <Filter size={15} color="var(--muted)" />
           <select className="select" style={{ height: 34, width: 'auto' }} value={filterCol} onChange={(e) => setFilterCol(e.target.value)}>
-            <option value="">Any column</option>{columns.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+            <option value="">Any Column</option>{columns.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
           </select>
           {filterCol && <input className="input" style={{ height: 34, width: 140 }} placeholder="contains…" value={filterVal} onChange={(e) => setFilterVal(e.target.value)} />}
         </div>
@@ -155,17 +157,17 @@ export function DataTable({ columns, rows, loading, exportName, linkKey, actions
           {bulk(filtered.filter((r, i) => marked.has(rowId(r, i)) && r._id).map((r) => r._id!), () => setMarked(new Set()))}
           <button className="btn btn-sm" onClick={() => setMarked(new Set())}>Clear</button></div>
       )}
-      <div className="table-wrap">
+      <div className={`table-wrap ${scroll ? 'scroll' : ''}`}>
         <table className="dt">
           <thead><tr>
-            <th className="chk" data-tip="Mark rows to export or act on"><label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}><input type="checkbox" aria-label="Mark all on this page" checked={view.length > 0 && view.every((r, i) => marked.has(rowId(r, page * size + i)))}
+            <th className="chk" data-tip="Mark rows to export or act on" data-tip-pos="right"><label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}><input type="checkbox" aria-label="Mark all on this page" checked={view.length > 0 && view.every((r, i) => marked.has(rowId(r, page * size + i)))}
               onChange={(e) => setMarked((m) => { const n = new Set(m); view.forEach((r, i) => (e.target.checked ? n.add(rowId(r, page * size + i)) : n.delete(rowId(r, page * size + i)))); return n; })} />#</label></th>
             {columns.map((c) => (
               <th key={c.key} onClick={() => setSort((s) => (s?.key === c.key ? (s.dir === 1 ? { key: c.key, dir: -1 } : null) : { key: c.key, dir: 1 }))}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>{c.label}{sort?.key === c.key ? (sort.dir === 1 ? ' ↑' : ' ↓') : <ArrowDownUp size={11} opacity={0.4} />}</span>
               </th>
             ))}
-            {actions && <th style={{ cursor: 'default' }}>Action</th>}
+            {actions && <th style={{ cursor: 'default' }}>Actions</th>}
           </tr></thead>
           <tbody>
             {loading && Array.from({ length: 6 }).map((_, i) => <tr key={i}><td colSpan={columns.length + 2}><div className="skeleton" style={{ width: `${60 + ((i * 13) % 35)}%` }} /></td></tr>)}

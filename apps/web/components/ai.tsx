@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Download, MessageSquarePlus, Send, Sparkles, X, Zap } from 'lucide-react';
+import { Download, MessageSquarePlus, Send, Sparkles, X } from 'lucide-react';
 import { api, timeAgo } from '@/lib/api';
 import { useApp } from './providers';
 
@@ -19,7 +19,7 @@ function Md({ text }: { text: string }) {
   })}</>;
 }
 function MsgView({ m }: { m: Msg }) {
-  if (m.status === 'pending') return <div className="msg assistant"><span className="typing"><i /><i /><i /></span><div className="hint" style={{ marginTop: 4 }}>Working in the background — you can close this panel.</div></div>;
+  if (m.status === 'pending') return <div className="msg assistant"><span className="typing"><i /><i /><i /></span></div>;
   return (
     <div className={`msg ${m.role}`}>
       <Md text={m.content} />
@@ -31,7 +31,6 @@ function MsgView({ m }: { m: Msg }) {
         </div>
       ))}
       {m.meta?.exports?.map((x) => <a key={x.id} className="ex-link" href={x.url} download><Download size={13} /> {x.name} · {x.rows} rows</a>)}
-      {m.meta?.stub && <div className="hint" style={{ marginTop: 6 }}>Offline mode — set OPENAI_BASE_URL / OPENAI_API_KEY for full answers.</div>}
     </div>
   );
 }
@@ -45,14 +44,18 @@ export function AiFab() {
   const [text, setText] = useState('');
   const [pending, setPending] = useState<Record<string, string>>({}); // messageId -> sessionId
   const [unseen, setUnseen] = useState(false);
-  const [status, setStatus] = useState<{ configured: boolean; model: string } | null>(null);
   const openRef = useRef(open); openRef.current = open;
   const curRef = useRef(current); curRef.current = current;
   const end = useRef<HTMLDivElement>(null);
   const busy = Object.keys(pending).length > 0;
 
   const loadSessions = () => api<Sess[]>('/ai/sessions').then(setSessions).catch(() => undefined);
-  useEffect(() => { if (open) { loadSessions(); api('/ai/status').then(setStatus).catch(() => undefined); setUnseen(false); } }, [open]);
+  useEffect(() => { if (open) { loadSessions(); setUnseen(false); } }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
+  }, [open]);
   useEffect(() => { end.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
 
   const settle = useCallback(async (messageId: string) => {
@@ -116,14 +119,14 @@ export function AiFab() {
             <div className="ai-top">
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span className="brand-mark" style={{ width: 30, height: 30, borderRadius: 9 }}><Sparkles size={15} /></span>
-                <div><b style={{ fontSize: 13.5 }}>AcIntel Assist</b><div className="hint">{status ? (status.configured ? `Connected · ${status.model}` : 'Preview — no AI provider configured') : '…'}</div></div>
+                <b style={{ fontSize: 13.5 }}>AcIntel Assist</b>
               </div>
-              <button className="icon-btn" onClick={() => setOpen(false)} data-tip="Minimise (keeps working)" data-tip-pos="left"><X size={18} /></button>
+              <button className="icon-btn" onClick={() => setOpen(false)} data-tip="Minimise" data-tip-pos="left" aria-label="Close assistant"><X size={18} /></button>
             </div>
             <div className="ai-msgs">
               {!msgs.length && (
                 <div style={{ margin: 'auto 0', display: 'grid', gap: 14 }}>
-                  <div><b style={{ fontSize: 15 }}>Ask about the control room</b><div className="hint">Questions and tasks run in the background — close this panel any time.</div></div>
+                  <b style={{ fontSize: 15 }}>Ask about the control room</b>
                   <div className="suggest">{SUGGEST.map((s) => <button key={s} onClick={() => send(s)}>{s}</button>)}</div>
                 </div>
               )}
@@ -134,14 +137,15 @@ export function AiFab() {
               <input className="input" placeholder="Ask or give a task…" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} />
               <button className="btn btn-primary" onClick={() => send()} disabled={!text.trim()}><Send size={15} /></button>
             </div>
-            <div className="ai-note"><Zap size={12} /> Background mode on by default · OpenAI-compatible endpoint</div>
           </div>
         </div>
       )}
-      <button className="fab" onClick={() => setOpen((o) => !o)} data-tip={open ? 'Minimise assistant' : 'AcIntel Assist'} data-tip-pos="left" aria-label="AcIntel Assist">
-        {open ? <X size={24} /> : <Sparkles size={24} />}
-        {(busy || unseen) && !open && <span className="live-dot" />}
-      </button>
+      {!open && (
+        <button className="fab" onClick={() => setOpen(true)} data-tip="AcIntel Assist" data-tip-pos="left" aria-label="Open AcIntel Assist">
+          <Sparkles size={24} />
+          {(busy || unseen) && <span className="live-dot" />}
+        </button>
+      )}
     </>
   );
 }

@@ -153,7 +153,7 @@ export class ActivitySimulator implements OnModuleInit, OnModuleDestroy {
       const u = await this.prisma.user.findFirst({ where: { status: 'active', lga } });
       const [lat, lng] = pointIn(lga);
       const a = await this.prisma.alarm.create({ data: { publicId: opaqueId(), type, sender: u?.name || name, phone: u?.phone || '0906' + Math.floor(1000000 + Math.random() * 8999999), location: `${lga}, Abia, Nigeria`, lga, lat, lng, userId: u?.id } });
-      await this.act.notify(`alarms.${type}`, 'alarm', `${type === 'panic' ? 'Panic' : 'Duress'} alarm — ${a.sender}`, lga, `/e/${a.publicId}`);
+      await this.act.notify('alarms.new', 'alarm', `${type === 'panic' ? 'Panic' : 'Duress'} alarm — ${a.sender}`, lga, `/e/${a.publicId}`);
       this.act.changed(['alarms']);
     }
   }

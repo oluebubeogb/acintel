@@ -1,4 +1,5 @@
 'use client';
+import { findChild } from '@/lib/nav';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Bell, CheckCheck, FileWarning, Siren, UserPlus, ShieldCheck } from 'lucide-react';
@@ -19,7 +20,7 @@ export default function AlertsPage() {
   const read = async (body: object, msg?: string) => { await api('/notifications/read', { method: 'POST', json: body }); load(); refreshCounts(); if (msg) toast(msg); };
   return (
     <>
-      <PageHead crumbs={[{ label: 'AcIntel', href: '/' }, { label: 'Alerts' }]} title="Alerts & notifications" subtitle={`${counts.total} unread · new signups, reports, alarms and dispatches`}
+      <PageHead crumbs={[{ label: 'AcIntel', href: '/' }, { label: 'Alerts' }]} title="Alerts & Notifications" subtitle={`${counts.total} unread · new signups, reports, alarms and dispatches`}
         actions={<>
           <div className="seg">{(['all', 'unread'] as const).map((f) => <button key={f} className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>{f === 'all' ? 'All' : 'Unread'}</button>)}</div>
           <button className="btn" disabled={!counts.total} onClick={() => read({ all: true }, 'All notifications marked as read')}><CheckCheck size={15} /> Mark all read</button>
@@ -34,7 +35,7 @@ export default function AlertsPage() {
               <span className={`feed-ico ${TONE[n.kind] || 'blue'}`}><I size={16} /></span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600 }}>{n.href ? <Link href={n.href} onClick={() => !n.readAt && read({ ids: [n.id] })}>{n.title}</Link> : n.title}</div>
-                <div className="hint">{n.body} · <span className="chip">{n.target}</span></div>
+                <div className="hint">{n.body} · <span className="chip">{(() => { const [a, b] = String(n.target).split('.'); return findChild(a, b)?.child.full || n.target; })()}</span></div>
               </div>
               <span className="hint" data-tip={`${lagosTime(n.createdAt)} WAT`}>{timeAgo(n.createdAt)}</span>
               {!n.readAt && <button className="btn btn-sm btn-ghost" onClick={() => read({ ids: [n.id] })} data-tip="Mark as read"><CheckCheck size={14} /></button>}

@@ -1,8 +1,9 @@
+import { titleCase as tc } from './api';
 export type NavChild = { key: string; label: string; full: string; href: string };
 export type NavParent = { key: string; short: string; full: string; icon: string; tone: 'blue' | 'green' | 'amber' | 'rose' | 'violet' | 'teal'; children: NavChild[] };
 
 const c = (section: string, child: string, label: string, full?: string): NavChild => ({
-  key: `${section}.${child}`, label, full: full || label, href: child === 'feed' ? '/alerts' : `/${section}/${child}`,
+  key: `${section}.${child}`, label: tc(label), full: tc(full || label), href: child === 'feed' ? '/alerts' : `/${section}/${child}`,
 });
 
 export const NAV: NavParent[] = [

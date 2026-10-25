@@ -42,7 +42,7 @@ function ConfirmDialog({ o, onDone }: { o: ConfirmOpts; onDone: (v: false | { va
   const ok = !o.input?.required || v.trim().length > 0;
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && onDone(false); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onDone]);
   return (
-    <div className="overlay" style={{ zIndex: 90 }} onMouseDown={(e) => e.target === e.currentTarget && onDone(false)}>
+    <div className="overlay" style={{ zIndex: 110 }} onMouseDown={(e) => e.target === e.currentTarget && onDone(false)}>
       <div className="modal modal-sm" role="alertdialog" aria-modal="true" aria-label={o.title}>
         <div className="modal-head"><div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
           <span className={`confirm-ico ${o.danger ? 'danger' : ''}`}>{o.danger ? <AlertTriangle size={18} /> : <Info size={18} />}</span>
@@ -147,6 +147,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => { dead = true; clearTimeout(t); };
   }, [pollSeconds, fetchCounts, live]);
 
+  // Soft chime for new alarms: fires when the unread 'alarms.new' count rises (pref: notifySound).
+  const soundOn = !!prefs?.effective.notifySound;
+  const lastAlarms = useRef<number | null>(null);
+  useEffect(() => { unlockChime(); }, []);
+  useEffect(() => {
+    const n = counts.targets['alarms.new'] || 0;
+    if (lastAlarms.current !== null && n > lastAlarms.current && soundOn) playChime();
+    lastAlarms.current = n;
+  }, [counts.targets, soundOn]);
+
   const can = useCallback((perm: string) => !!me && (me.perms?.includes('*') || me.perms?.includes(perm)), [me]);
   const pageSize = Number(prefs?.effective.pageSize) || 500;
   return (
@@ -164,6 +174,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       </div>
     </AppCtx.Provider>
   );
+}
+
+/* ---------- Web Audio chime ---------- */
+let audioCtx: AudioContext | null = null;
+let lastChime = 0;
+function ctx() {
+  if (typeof window === 'undefined') return null;
+  if (!audioCtx) { const AC = window.AudioContext || (window as any).webkitAudioContext; if (!AC) return null; audioCtx = new AC(); }
+  return audioCtx;
+}
+/** Browsers start audio suspended until a user gesture — resume on the first click/key so later chimes can play. */
+function unlockChime() {
+  const go = () => { ctx()?.resume().catch(() => undefined); window.removeEventListener('pointerdown', go); window.removeEventListener('keydown', go); };
+  window.addEventListener('pointerdown', go); window.addEventListener('keydown', go);
+}
+/** Two soft sine partials (A5 + E6) with a gentle attack and exponential decay; peak gain ≤ 0.12 through a compressor so it never clips. */
+export function playChime() {
+  const ac = ctx(); if (!ac) return;
+  const now = performance.now(); if (now - lastChime < 1500) return; lastChime = now;
+  if (ac.state === 'suspended') ac.resume().catch(() => undefined);
+  const t = ac.currentTime + 0.02;
+  const comp = ac.createDynamicsCompressor();
+  comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 6; comp.attack.value = 0.003; comp.release.value = 0.25;
+  const master = ac.createGain(); master.gain.value = 0.9;
+  comp.connect(master); master.connect(ac.destination);
+  ([[880, 0.12, 0], [1320, 0.07, 0.11]] as const).forEach(([f, peak, d]) => {
+    const o = ac.createOscillator(); const g = ac.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(f, t + d);
+    g.gain.setValueAtTime(0.0001, t + d);
+    g.gain.exponentialRampToValueAtTime(peak, t + d + 0.025);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.9);
+    o.connect(g); g.connect(comp); o.start(t + d); o.stop(t + d + 0.95);
+  });
+  setTimeout(() => { try { master.disconnect(); } catch { /* */ } }, 1400);
 }
 
 /** Badge that pops when its number goes up. */
