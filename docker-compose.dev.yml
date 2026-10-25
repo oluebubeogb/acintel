@@ -1,0 +1,11 @@
+# Optional local override: publish db/redis/api on the host for npm-based dev.
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db redis
+services:
+  db:
+    ports: ["${DB_HOST_PORT:-5433}:5432"]
+  redis:
+    ports: ["${REDIS_HOST_PORT:-6379}:6379"]
+  api:
+    environment:
+      COOKIE_SECURE: "false"
+    ports: ["${API_HOST_PORT:-4000}:4000"]

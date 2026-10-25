@@ -1,0 +1,106 @@
+# AcIntel — production compose (Coolify-ready). Only `web` is published; it proxies /api -> api internally.
+name: acintel
+
+x-tz: &tz
+  TZ: Africa/Lagos
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      <<: *tz
+      POSTGRES_USER: ${POSTGRES_USER:-acintel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-acintel}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      <<: *tz
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-acintel}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-acintel}
+      REDIS_URL: redis://redis:6379
+      COOKIE_SECURE: ${COOKIE_SECURE:-auto}
+      TRUST_PROXY: ${TRUST_PROXY:-loopback, linklocal, uniquelocal}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@acintel.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-Passw0rd!23}
+      SEED_DEMO: ${SEED_DEMO:-true}
+      SEED_RESET: ${SEED_RESET:-false}
+      SIMULATE_ACTIVITY: ${SIMULATE_ACTIVITY:-true}
+      SIMULATE_INTERVAL_MS: ${SIMULATE_INTERVAL_MS:-45000}
+      COUNTS_CACHE_MS: ${COUNTS_CACHE_MS:-2000}
+      AGENT_ONLINE_MINUTES: ${AGENT_ONLINE_MINUTES:-15}
+      LOGIN_MAX_FAILS: ${LOGIN_MAX_FAILS:-5}
+      LOGIN_MAX_PER_IP: ${LOGIN_MAX_PER_IP:-30}
+      LOGIN_WINDOW_MINUTES: ${LOGIN_WINDOW_MINUTES:-15}
+      UPLOAD_DIR: /data/uploads
+      MEDIA_MAX_MB: ${MEDIA_MAX_MB:-25}
+      MAP_STYLE_URL: ${MAP_STYLE_URL:-}
+      MAP_TILE_URL: ${MAP_TILE_URL:-https://tile.openstreetmap.org/{z}/{x}/{y}.png}
+      MAP_ATTRIBUTION: ${MAP_ATTRIBUTION:-© OpenStreetMap contributors}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_TIMEOUT_MS: ${OPENAI_TIMEOUT_MS:-60000}
+    volumes:
+      - uploads:/data/uploads
+    expose:
+      - "4000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api: { condition: service_healthy }
+    environment:
+      <<: *tz
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      API_INTERNAL_URL: http://api:4000
+    ports:
+      - "${WEB_HOST_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 6
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:

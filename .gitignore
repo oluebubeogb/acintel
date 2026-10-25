@@ -1,0 +1,9 @@
+node_modules
+dist
+.next
+.env
+*.log
+screenshots/*.tmp
+
+apps/web/public/maplibre/
+*.tsbuildinfo

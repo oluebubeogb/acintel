@@ -1,0 +1,279 @@
+// AcIntel schema (Phases 0–6) — standalone. Mirrors Homeland CSAS entities so the
+// Phase 7 DataPort handshake can map legacy ids into `legacyId` columns.
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model AdminUser {
+  id           String         @id @default(cuid())
+  publicId     String         @unique // opaque, non-memorable route id
+  email        String         @unique
+  name         String
+  role         String         @default("controller") // superadmin | controller | group_admin
+  status       String         @default("active") // active | suspended
+  phone        String?
+  groupId      String? // scope for group_admin (structure for later)
+  group        HomelandGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  passwordHash String
+  lastLoginAt  DateTime?
+  createdAt    DateTime       @default(now())
+  sessions     Session[]
+  preferences  Preference[]
+  aiSessions   AiSession[]
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  adminId   String
+  admin     AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+}
+
+/// scope = "site" (sitewide, adminId null) or "admin" (per-admin)
+model Preference {
+  id        String     @id @default(cuid())
+  scope     String
+  adminId   String?
+  admin     AdminUser? @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  key       String
+  value     Json
+  updatedAt DateTime   @updatedAt
+
+  @@unique([scope, adminId, key])
+}
+
+/// Drives the Alerts feed and the live nav count badges.
+/// `target` = nav child key, e.g. "users.pending", "reports.new", "alarms.panic".
+model Notification {
+  id        String    @id @default(cuid())
+  target    String
+  kind      String
+  title     String
+  body      String?
+  href      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([target, readAt])
+}
+
+model User {
+  id         String     @id @default(cuid())
+  publicId   String     @unique
+  legacyId   String?    @unique
+  name       String
+  phone      String
+  email      String?
+  lga        String
+  status     String     @default("active") // active | suspended | pending
+  device     String?
+  createdAt  DateTime   @default(now())
+  lastLogin  DateTime?
+  approvedAt DateTime?
+  incidents  Incident[]
+  alarms     Alarm[]
+
+  @@index([status])
+  @@index([lga])
+}
+
+/// App devices seen across users and agents (label = "Android 15 · samsung SM-A055F").
+model Device {
+  id        String   @id @default(cuid())
+  publicId  String   @unique
+  label     String   @unique
+  os        String?
+  model     String?
+  createdAt DateTime @default(now())
+}
+
+model HomelandGroup {
+  id          String      @id @default(cuid())
+  publicId    String      @unique
+  name        String      @unique
+  description String?
+  lga         String?
+  status      String      @default("active") // active | inactive
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  agents      Agent[]
+  admins      AdminUser[]
+}
+
+model ReportCategory {
+  id             String     @id @default(cuid())
+  publicId       String     @unique
+  name           String     @unique
+  description    String?
+  riskLevel      String     @default("medium") // low | medium | high | critical
+  sendAgentCount Int        @default(3)
+  status         String     @default("active") // active | inactive
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  incidents      Incident[]
+}
+
+model Agent {
+  id         String         @id @default(cuid())
+  publicId   String         @unique
+  legacyId   String?        @unique
+  name       String
+  phone      String
+  email      String?
+  nin        String?
+  lga        String
+  groupId    String? // null = un-assigned
+  group      HomelandGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  status     String         @default("active") // active | suspended
+  device     String?
+  lat        Float?
+  lng        Float?
+  lastSeenAt DateTime?
+  createdAt  DateTime       @default(now())
+
+  @@index([status])
+  @@index([lga])
+}
+
+model Incident {
+  id          String          @id @default(cuid())
+  publicId    String          @unique
+  legacyId    String?         @unique
+  category    String // category name snapshot (kept in sync on rename)
+  categoryId  String?
+  categoryRef ReportCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  details     String
+  location    String
+  lga         String
+  lat         Float?
+  lng         Float?
+  status      String          @default("new") // new | dispatched | acted | resolved | fake
+  reporterId  String?
+  reporter    User?           @relation(fields: [reporterId], references: [id], onDelete: SetNull)
+  createdAt   DateTime        @default(now())
+  actedAt     DateTime?
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  note        String?
+  dispatches  Dispatch[]
+  media       IncidentMedia[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model IncidentMedia {
+  id         String   @id @default(cuid())
+  publicId   String   @unique
+  incidentId String
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  kind       String // image | video | audio | file
+  storage    String // local | url
+  url        String // external URL, or local file key under UPLOAD_DIR
+  filename   String?
+  mime       String?
+  size       Int?
+  uploadedBy String
+  createdAt  DateTime @default(now())
+}
+
+model Dispatch {
+  id         String   @id @default(cuid())
+  incidentId String
+  incident   Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  agencies   String[]
+  byAdmin    String
+  note       String?
+  createdAt  DateTime @default(now())
+}
+
+model Alarm {
+  id         String    @id @default(cuid())
+  publicId   String    @unique
+  type       String // duress | panic
+  sender     String
+  phone      String
+  location   String?
+  lga        String?
+  lat        Float?
+  lng        Float?
+  userId     String?
+  user       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  status     String    @default("new") // new | resolved
+  resolvedAt DateTime?
+  resolvedBy String?
+  createdAt  DateTime  @default(now())
+
+  @@index([status, type])
+}
+
+model AiSession {
+  id        String      @id @default(cuid())
+  adminId   String
+  admin     AdminUser   @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  title     String
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  messages  AiMessage[]
+}
+
+model AiMessage {
+  id        String    @id @default(cuid())
+  sessionId String
+  session   AiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String
+  content   String
+  status    String    @default("done") // pending | done | error
+  meta      Json?
+  createdAt DateTime  @default(now())
+}
+
+/// CSV files produced by AcIntel Assist tools (downloaded via /ai/exports/:id).
+model AiExport {
+  id        String   @id @default(cuid())
+  publicId  String   @unique
+  adminId   String
+  name      String
+  csv       String
+  rowCount  Int
+  createdAt DateTime @default(now())
+}
+
+/// Every write action (who, what, before/after) — powers the Audit log page and Undo.
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actorEmail String
+  action     String // e.g. user.suspend, incident.dispatch
+  entityType String
+  entityId   String? // publicId of the entity
+  summary    String
+  before     Json?
+  after      Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entityId])
+}
+
+/// "Security Tips → Send alert" broadcasts
+model SecurityAlert {
+  id        String   @id @default(cuid())
+  publicId  String   @unique
+  title     String
+  body      String
+  lga       String   @default("All")
+  userType  String   @default("All")
+  group     String   @default("All")
+  sender    String
+  createdAt DateTime @default(now())
+}
