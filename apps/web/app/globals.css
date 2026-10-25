@@ -528,3 +528,14 @@ td .btn-agent.btn-sm { width: 30px; padding: 0; justify-content: center; }
 .vg-note { flex: 1; min-width: 180px; }
 .skeleton-card { display: grid; gap: 10px; cursor: default; }
 @media (max-width: 600px) { .vg-meta, .vg-foot { margin-left: 0; } .vg-meta { grid-template-columns: 1fr; } .vg-search { margin-left: 0; max-width: none; } }
+
+/* ── Settings → AI ── */
+.ai-provider { font-size: 12.5px; padding: 9px 11px; border-radius: var(--r); margin-bottom: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2); line-height: 1.45; }
+.ai-provider.ok { border-color: color-mix(in srgb, var(--green) 35%, var(--line)); background: color-mix(in srgb, var(--green) 7%, var(--surface)); }
+.ai-provider.off { border-color: color-mix(in srgb, var(--amber) 40%, var(--line)); background: color-mix(in srgb, var(--amber) 8%, var(--surface)); }
+.ai-provider code, .ai-settings code { font-size: 11.5px; }
+.ai-settings .toggle-row b .chip { margin-left: 6px; vertical-align: middle; font-size: 10.5px; }
+.toggle-row.is-muted { opacity: .55; }
+.switch.is-disabled { opacity: .5; cursor: not-allowed; }
+.ai-paused { display: grid; gap: 4px; padding: 12px 14px; border-radius: var(--r); border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--line)); background: color-mix(in srgb, var(--amber) 8%, var(--surface)); }
+.ai-paused b { font-size: 14px; } .ai-paused span { font-size: 12.5px; color: var(--muted); }

@@ -44,13 +44,14 @@ export function AiFab() {
   const [text, setText] = useState('');
   const [pending, setPending] = useState<Record<string, string>>({}); // messageId -> sessionId
   const [unseen, setUnseen] = useState(false);
+  const [paused, setPaused] = useState(false); // Settings → AI → Control Room Chat (or master AI) switched off
   const openRef = useRef(open); openRef.current = open;
   const curRef = useRef(current); curRef.current = current;
   const end = useRef<HTMLDivElement>(null);
   const busy = Object.keys(pending).length > 0;
 
   const loadSessions = () => api<Sess[]>('/ai/sessions').then(setSessions).catch(() => undefined);
-  useEffect(() => { if (open) { loadSessions(); setUnseen(false); } }, [open]);
+  useEffect(() => { if (open) { loadSessions(); setUnseen(false); api<any>('/ai/status').then((s) => setPaused(s?.features?.aiChat?.on === false)).catch(() => undefined); } }, [open]);
   useEffect(() => {
     if (!open) return;
     const k = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
@@ -119,14 +120,15 @@ export function AiFab() {
             <div className="ai-top">
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span className="brand-mark" style={{ width: 30, height: 30, borderRadius: 9 }}><Sparkles size={15} /></span>
-                <b style={{ fontSize: 13.5 }}>AcIntel Assist</b>
+                <b style={{ fontSize: 13.5 }}>AcIntel Assist</b>{paused && <span className="chip amber" data-tip="A superadmin paused Control Room Chat in Settings → AI">Paused</span>}
               </div>
               <button className="icon-btn" onClick={() => setOpen(false)} data-tip="Minimise" data-tip-pos="left" aria-label="Close assistant"><X size={18} /></button>
             </div>
             <div className="ai-msgs">
               {!msgs.length && (
                 <div style={{ margin: 'auto 0', display: 'grid', gap: 14 }}>
-                  <b style={{ fontSize: 15 }}>Ask about the control room</b>
+                  {paused ? <div className="ai-paused"><b>AI chat is paused in Settings</b><span>No AI model is used right now. Simple count, list and CSV questions still work offline.</span></div>
+                    : <b style={{ fontSize: 15 }}>Ask about the control room</b>}
                   <div className="suggest">{SUGGEST.map((s) => <button key={s} onClick={() => send(s)}>{s}</button>)}</div>
                 </div>
               )}

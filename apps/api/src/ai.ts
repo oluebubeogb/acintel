@@ -9,6 +9,7 @@ import { LGAS } from './geo';
 import { PERIODS, dayKey, fmt, periodLabel, rangeFor } from './lagos';
 import { Msg, aiConfigured, cleanContent, inlineToolCalls, llm, tidyHistory } from './llm';
 import { aiBase } from './llm';
+import { aiFlags, aiOn, incidentAiEnvOff } from './ai-flags';
 import { agentRow, alarmRow, incidentRow, userRow, AGENT_COLS, ALARM_COLS, INC_COLS, USER_COLS } from './rows';
 
 /**
@@ -166,6 +167,12 @@ export class AiController {
     history.reverse();
     const last = [...history].reverse().find((m) => m.role === 'user')?.content || '';
 
+    if (!(await aiOn(this.prisma, 'aiChat'))) {
+      // Paused in Settings → AI: never call the provider; the built-in query engine still answers simple questions.
+      const e = await this.engine(last, admin, meta);
+      (meta as any).paused = true;
+      return { content: e?.text || 'AI chat is paused in Settings → AI. I can still answer simple count, list and CSV questions offline — e.g. “How many new reports today?” or “Export active agents in Aba North as CSV”.', meta, stub: true };
+    }
     if (!aiConfigured()) {
       const e = await this.engine(last, admin, meta);
       return { content: e?.text || this.tips(), meta, stub: true };
@@ -222,7 +229,21 @@ export class AiController {
   }
 
   @Get('status')
-  status() { return { configured: aiConfigured(), model: process.env.OPENAI_MODEL || 'gpt-4o-mini', base: aiBase(), tools: TOOLS.map((t) => t.function.name), background: true }; }
+  async status() {
+    const flags = await aiFlags(this.prisma);
+    const configured = aiConfigured();
+    const on = (k: 'aiIncidentText' | 'aiChat' | 'aiRegenerate') => flags.aiEnabled && flags[k];
+    return {
+      configured, model: process.env.OPENAI_MODEL || 'gpt-4o-mini', base: aiBase(), tools: TOOLS.map((t) => t.function.name), background: true,
+      flags,
+      // Running = switched on AND a provider is configured (and, for the worker, not hard-disabled by INCIDENT_AI=false).
+      features: {
+        aiIncidentText: { on: on('aiIncidentText'), envOff: incidentAiEnvOff(), running: configured && on('aiIncidentText') && !incidentAiEnvOff() },
+        aiChat: { on: on('aiChat'), running: configured && on('aiChat') },
+        aiRegenerate: { on: on('aiRegenerate'), running: configured && on('aiRegenerate') },
+      },
+    };
+  }
 
   @Get('sessions')
   sessions(@CurrentAdmin() admin: AdminCtx) {

@@ -139,3 +139,24 @@ _Status: Phases 0–6 are complete and verified locally on 25 Oct 2026. Phase 7 
   - `GET /reports/sources` now accepts `status` and `category` as well as period, from/to and lga. The source cards refetch on every filter change, so the totals and sub-lines (new · open · resolved · today) reflect the filtered set.
   - The active card also follows the table search and column filter (counts come from the visible rows) and shows a "N marked" pill when rows are ticked.
   - Clicking a card switches source and keeps the filters in the URL.
+
+## AI switches (Settings → AI)
+- New site prefs, all default **on** so behaviour is unchanged when unset. Defined in `apps/api/src/ai-flags.ts` and merged into `SITE_DEFAULTS`:
+  - `aiEnabled` — master switch;
+  - `aiIncidentText` — Report Titles & Summaries (the `IncidentAiWorker`);
+  - `aiChat` — Control Room Chat (AcIntel Assist);
+  - `aiRegenerate` — On-Demand Regenerate (`POST /incidents/:id/ai`).
+- How the switches are read:
+  - read from the DB with a cache of at most 3 seconds, and the cache is cleared on every site `PUT /prefs`, so Pause and Start take effect without an API restart;
+  - site scope only (admin-scope copies are ignored);
+  - values are coerced to booleans;
+  - saves are already audited under `settings.site`.
+- **Worker:** `run()` and `generate()` skip the LLM when the feature is paused; local titles still show. `INCIDENT_AI=false` is still a hard off for the worker.
+- **Chat:** when paused, the provider is never called. The offline query engine still answers count, list and CSV questions; anything else gets a short "AI chat is paused in Settings → AI" reply (`meta.paused`).
+- **Regenerate:** returns 400 "On-Demand Regenerate is paused in Settings → AI…" when paused, and the incident page disables the button with a tooltip.
+- **`GET /ai/status`** now returns `flags` plus `features.{aiIncidentText,aiChat,aiRegenerate}.{on,running[,envOff]}`.
+- **Settings AI card:**
+  - shows whether the provider is configured (with a hint that no credits are used until `OPENAI_*` is set);
+  - has the master switch plus three feature switches, superadmin only;
+  - shows a chip per feature: Running / Paused / Idle · No Keys / Off (Env).
+- **AcIntel Assist panel:** shows a "Paused" chip and a short paused notice instead of the usual intro.

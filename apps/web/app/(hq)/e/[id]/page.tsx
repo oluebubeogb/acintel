@@ -84,6 +84,8 @@ function MediaPanel({ id, media, ops, onChange }: { id: string; media: Media[]; 
 function IncidentText({ raw, id, ops, onChange }: { raw: any; id: string; ops: boolean; onChange: () => void }) {
   const { toast } = useApp();
   const [busy, setBusy] = useState(false);
+  const [regenOn, setRegenOn] = useState(true);
+  useEffect(() => { api<any>('/ai/status').then((s) => setRegenOn(!!s?.features?.aiRegenerate?.on)).catch(() => undefined); }, []);
   const ai = !!raw.aiSummary;
   const regen = async () => {
     setBusy(true);
@@ -93,7 +95,7 @@ function IncidentText({ raw, id, ops, onChange }: { raw: any; id: string; ops: b
     <div className="ai-split">
       <div className="card card-pad ai-card">
         <div className="ai-head"><span className="ai-ico"><Sparkles size={15} /></span><div><h3>{ai ? 'AI Summary' : 'Summary'}</h3><p>{ai ? `Generated ${raw.aiAt || ''}` : 'Local summary · AI pending or not configured'}</p></div>
-          {ops && <button className="btn btn-sm btn-ghost" style={{ marginLeft: 'auto' }} disabled={busy} onClick={regen} data-tip="Re-generate the headline and summary with AI"><RefreshCw size={13} className={busy ? 'spin' : ''} /></button>}</div>
+          {ops && <button className="btn btn-sm btn-ghost" style={{ marginLeft: 'auto' }} disabled={busy || !regenOn} onClick={regen} data-tip={regenOn ? 'Re-generate the headline and summary with AI' : 'On-Demand Regenerate is paused in Settings → AI'}><RefreshCw size={13} className={busy ? 'spin' : ''} /></button>}</div>
         <div className="ai-title">{raw.title}</div>
         <p className="ai-body">{raw.aiSummary || raw.localSummary}</p>
         <div className="ai-foot">{ai ? <span className="chip violet"><Bot size={12} /> AI</span> : <span className="chip">Local summary</span>}<span className="chip">{raw.category}</span><span className="chip">{raw.lga}</span></div>

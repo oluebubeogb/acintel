@@ -9,6 +9,7 @@ import { opaqueId } from './util';
 import { Activity, Bus, Counts } from './realtime';
 import { LGAS, pointIn } from './geo';
 import { ForbiddenException } from '@nestjs/common';
+import { AI_FLAG_DEFAULTS, AI_FLAG_KEYS, invalidateAiFlags } from './ai-flags';
 
 export const SITE_DEFAULTS: Record<string, unknown> = {
   pageSize: 500,
@@ -19,6 +20,7 @@ export const SITE_DEFAULTS: Record<string, unknown> = {
   notifyAlarms: true,
   notifySound: false,
   compactTables: false,
+  ...AI_FLAG_DEFAULTS, // Settings → AI: aiEnabled, aiIncidentText, aiChat, aiRegenerate (all on by default)
 };
 
 @Controller()
@@ -60,12 +62,17 @@ export class PrefsController {
       if (!Number.isFinite(n)) throw new BadRequestException('pollSeconds must be a number');
       values.pollSeconds = Math.min(120, Math.max(10, n)); // cap extremes so shared hosting / Coolify proxies are never hammered
     }
+    for (const k of AI_FLAG_KEYS) if (k in values) {
+      if (scope !== 'site') delete values[k]; // AI switches are site-wide only
+      else values[k] = values[k] !== false && values[k] !== 'false';
+    }
     for (const [key, value] of Object.entries(values)) {
       const adminId = scope === 'admin' ? admin.id : null;
       const existing = await this.prisma.preference.findFirst({ where: { scope, adminId, key } });
       if (existing) await this.prisma.preference.update({ where: { id: existing.id }, data: { value: value as any } });
       else await this.prisma.preference.create({ data: { scope, adminId, key, value: value as any } });
     }
+    if (scope === 'site') invalidateAiFlags();
     return this.get(admin);
   }
 }

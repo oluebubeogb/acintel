@@ -8,6 +8,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 import { aiConfigured, cleanContent, llm } from './llm';
+import { AiFeature, aiOn, incidentAiEnvOff } from './ai-flags';
 
 export const SOURCES = ['user', 'agent', 'call_centre', 'ecc'] as const;
 export type Source = (typeof SOURCES)[number];
@@ -105,15 +106,17 @@ export class IncidentAiWorker implements OnModuleInit, OnModuleDestroy {
   private t?: NodeJS.Timeout; private busy = false;
   constructor(private prisma: PrismaService) {}
   onModuleInit() {
-    if (process.env.INCIDENT_AI === 'false') return;
+    if (incidentAiEnvOff()) return; // env hard-off; Settings → AI → Report Titles & Summaries pauses it at runtime
     this.t = setInterval(() => this.run().catch((e) => console.warn('[incident-ai]', e?.message)), Number(process.env.INCIDENT_AI_INTERVAL_MS || 60000));
   }
   onModuleDestroy() { if (this.t) clearInterval(this.t); }
 
   /** Generate (or regenerate) AI title + summary for one incident. Returns null when AI is not configured/failed. */
-  async generate(id: string): Promise<{ title: string; summary: string } | null> {
+  /** `feature` = which Settings switch gates this call (background worker vs on-demand regenerate). Local titles are unaffected. */
+  async generate(id: string, feature: AiFeature = 'aiIncidentText'): Promise<{ title: string; summary: string } | null> {
+    if (!aiConfigured() || !(await aiOn(this.prisma, feature))) return null;
     const i = await this.prisma.incident.findUnique({ where: { id } });
-    if (!i || !aiConfigured()) return null;
+    if (!i) return null;
     await this.prisma.incident.update({ where: { id }, data: { aiAt: new Date() } });
     const r = await llm([{ role: 'system', content: PROMPT }, { role: 'user', content: `Category: ${i.category}\nLGA: ${i.lga}\nLocation: ${i.location}\nReport: ${i.details}` }]);
     if (!r || !r.ok || !r.message.content) return null;
@@ -123,7 +126,7 @@ export class IncidentAiWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   private async run() {
-    if (this.busy || !aiConfigured()) return;
+    if (this.busy || !aiConfigured() || incidentAiEnvOff() || !(await aiOn(this.prisma, 'aiIncidentText'))) return;
     this.busy = true;
     try {
       const retry = new Date(Date.now() - 6 * 3600000);

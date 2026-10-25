@@ -18,6 +18,7 @@ import { StandaloneDataPort } from './dataport';
 import { assignAgents, syncTasks } from './tasks';
 import { actionLabel } from './rows';
 import { IncidentAiWorker, localTitle } from './incident-text';
+import { aiOn } from './ai-flags';
 import { aiConfigured } from './llm';
 import { isOnline } from './rows';
 import { fmt } from './lagos';
@@ -411,10 +412,11 @@ export class IncidentsController {
   /** (Re)generate the AI headline + summary for one incident (needs OPENAI_* configured). */
   @Post(':publicId/ai') @HttpCode(200) @RequirePerm('ops')
   async aiSummary(@Param('publicId') publicId: string, @CurrentAdmin() admin: AdminCtx) {
+    if (!(await aiOn(this.prisma, 'aiRegenerate'))) throw new BadRequestException('On-Demand Regenerate is paused in Settings → AI — a superadmin can turn it back on');
     if (!aiConfigured()) throw new BadRequestException('AI is not configured — set OPENAI_BASE_URL and OPENAI_API_KEY on the API');
     const inc = await this.prisma.incident.findUnique({ where: { publicId } });
     if (!inc) throw new NotFoundException('Report not found');
-    const r = await this.ai.generate(inc.id);
+    const r = await this.ai.generate(inc.id, 'aiRegenerate');
     if (!r) throw new BadRequestException('The AI model did not return a usable summary — try again shortly');
     await this.act.audit(admin, 'incident.ai', 'incident', inc.publicId, `Generated AI summary: ${r.title}`);
     this.act.changed(['reports'], inc.publicId);

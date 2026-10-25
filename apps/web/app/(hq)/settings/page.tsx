@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Save } from 'lucide-react';
+import { Bot, Save } from 'lucide-react';
+import { api } from '@/lib/api';
 import { PageHead } from '@/components/shell';
 import { playChime, useApp } from '@/components/providers';
 
@@ -12,18 +13,33 @@ const TOGGLES: [string, string, string][] = [
   ['compactTables', 'Compact Tables', 'Denser rows for large lists'],
 ];
 
+const AI_TOGGLES: [string, string, string][] = [
+  ['aiIncidentText', 'Report Titles & Summaries', 'Background worker that writes an AI headline + summary for each new report (local titles are always shown)'],
+  ['aiChat', 'Control Room Chat', 'AcIntel Assist uses the AI model; when paused it answers simple count/list/CSV questions offline'],
+  ['aiRegenerate', 'On-Demand Regenerate', 'The regenerate button on a single report page'],
+];
+type AiStatus = { configured: boolean; model: string; features: Record<string, { on: boolean; running: boolean; envOff?: boolean }> };
+
+function Switch({ on, disabled, onToggle, label }: { on: boolean; disabled?: boolean; onToggle: () => void; label: string }) {
+  return <span className={`switch ${on ? 'on' : ''} ${disabled ? 'is-disabled' : ''}`} role="switch" aria-label={label} aria-checked={on} aria-disabled={disabled} tabIndex={disabled ? -1 : 0}
+    onClick={() => !disabled && onToggle()} onKeyDown={(e) => !disabled && (e.key === ' ' || e.key === 'Enter') && (e.preventDefault(), onToggle())}><i /></span>;
+}
+
 export default function SettingsPage() {
   const { prefs, savePrefs, toast, me, can, live } = useApp();
   const [v, setV] = useState<Record<string, any> | null>(null);
   const [custom, setCustom] = useState('');
   const [busy, setBusy] = useState(false);
+  const [ai, setAi] = useState<AiStatus | null>(null);
+  const loadAi = () => api<AiStatus>('/ai/status').then(setAi).catch(() => undefined);
+  useEffect(() => { loadAi(); }, []);
   useEffect(() => { if (prefs && !v) setV({ ...prefs.site }); }, [prefs, v]);
   if (!v) return <div className="card card-pad"><div className="skeleton" style={{ width: '40%' }} /></div>;
   const opts: number[] = v.pageSizeOptions || [25, 100, 500, 1000];
   const isCustom = !opts.includes(Number(v.pageSize));
   const save = async () => {
     setBusy(true);
-    try { await savePrefs('site', v); toast('Site settings saved'); } catch (e: any) { toast(e.message, 'error'); } finally { setBusy(false); }
+    try { await savePrefs('site', v); toast('Site settings saved'); loadAi(); } catch (e: any) { toast(e.message, 'error'); } finally { setBusy(false); }
   };
   return (
     <>
@@ -61,6 +77,37 @@ export default function SettingsPage() {
                 onClick={() => { if (k === 'notifySound' && !v[k]) playChime(); setV({ ...v, [k]: !v[k] }); }} onKeyDown={(e) => (e.key === ' ' || e.key === 'Enter') && (e.preventDefault(), setV({ ...v, [k]: !v[k] }))}><i /></span>
             </label>
           ))}
+        </div>
+        <div className="card card-pad ai-settings">
+          <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 8 }}><Bot size={17} /> AI</h3>
+          <div className={`ai-provider ${ai?.configured ? 'ok' : 'off'}`}>
+            {ai ? (ai.configured ? <><b>Provider Configured</b> · model <code>{ai.model}</code></> : <><b>Provider Not Configured</b> · switches can be saved, but no AI credits are used until <code>OPENAI_BASE_URL</code> and <code>OPENAI_API_KEY</code> are set on the API</>) : 'Checking provider…'}
+          </div>
+          {(() => {
+            const site = can('settings.site');
+            const master = v.aiEnabled !== false;
+            const state = (k: string) => {
+              const on = master && v[k] !== false;
+              const saved = prefs?.site[k] !== false && prefs?.site.aiEnabled !== false;
+              if (!on) return <span className="chip">Paused</span>;
+              if (k === 'aiIncidentText' && ai?.features?.aiIncidentText?.envOff) return <span className="chip amber" data-tip="INCIDENT_AI=false is set on the API">Off (Env)</span>;
+              if (ai && !ai.configured) return <span className="chip amber">Idle · No Keys</span>;
+              return <span className="chip green">{saved ? 'Running' : 'Running After Save'}</span>;
+            };
+            return <>
+              <label className="toggle-row">
+                <div><b>AI Enabled</b><div className="hint">Master switch — pause every AI feature at once without touching the server env</div></div>
+                <Switch label="AI Enabled" on={master} disabled={!site} onToggle={() => setV({ ...v, aiEnabled: !master })} />
+              </label>
+              {AI_TOGGLES.map(([k, l, h]) => (
+                <label key={k} className={`toggle-row ${master ? '' : 'is-muted'}`}>
+                  <div><b>{l} {state(k)}</b><div className="hint">{h}</div></div>
+                  <Switch label={l} on={v[k] !== false} disabled={!site || !master} onToggle={() => setV({ ...v, [k]: v[k] === false })} />
+                </label>
+              ))}
+              <p className="hint">{site ? 'Changes apply within a few seconds of Save Changes — no API restart.' : 'Superadmin only.'} The provider itself (<code>OPENAI_*</code>) stays in the server env.</p>
+            </>;
+          })()}
         </div>
       </div>
     </>
