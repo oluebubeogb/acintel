@@ -24,6 +24,7 @@ const PERIODS = [['all', 'All Time'], ['today', 'Today'], ['yesterday', 'Yesterd
 type Data = { columns: Col[]; rows: Row[]; total: number };
 type Filt = { lga: string; status: string; group: string; category: string; period: string; from: string; to: string; source: string };
 const SOURCES = [['user', 'User'], ['agent', 'Agent'], ['call_centre', 'Call Centre'], ['ecc', 'ECC']] as const;
+const INC_STATUS = [['new', 'New'], ['dispatched', 'Dispatched'], ['acted', 'Acted Upon'], ['resolved', 'Resolved']] as const;
 const SOURCE_PAGE: Record<string, string> = { 'reports.users': 'user', 'reports.agents': 'agent', 'reports.call-centre': 'call_centre', 'reports.ecc': 'ecc' };
 const SOURCE_STYLE: Record<string, { icon: string; accent: string; href: string }> = { user: { icon: 'user', accent: '#2563eb', href: '/reports/users' }, agent: { icon: 'agent', accent: '#16a34a', href: '/reports/agents' }, call_centre: { icon: 'headset', accent: '#ea580c', href: '/reports/call-centre' }, ecc: { icon: 'radio', accent: '#7c3aed', href: '/reports/ecc' } };
 
@@ -38,7 +39,8 @@ function filtersFor(key: string): (keyof Filt)[] {
   return [];
 }
 
-function FilterBar({ keys, f, setF, statusOpts }: { keys: (keyof Filt)[]; f: Filt; setF: (f: Filt) => void; statusOpts: string[] }) {
+type Opt = string | readonly [string, string];
+function FilterBar({ keys, f, setF, statusOpts }: { keys: (keyof Filt)[]; f: Filt; setF: (f: Filt) => void; statusOpts: Opt[] }) {
   const groups = useGroups();
   const [cats, setCats] = useState<string[]>([]);
   useEffect(() => { if (keys.includes('category')) api<{ name: string }[]>('/categories').then((c) => setCats(c.map((x) => x.name))).catch(() => undefined); }, [keys]);
@@ -47,7 +49,7 @@ function FilterBar({ keys, f, setF, statusOpts }: { keys: (keyof Filt)[]; f: Fil
   const active = keys.some((k) => (k === 'period' ? f.period !== 'all' : k === 'from' || k === 'to' ? false : f[k] && f[k] !== 'All'));
   return (
     <div className="filters card">
-      {keys.includes('status') && <label data-tip="Filter by status"><span>Status</span><select className="select" value={f.status} onChange={s('status')}>{['All', ...statusOpts].map((x) => <option key={x}>{x}</option>)}</select></label>}
+      {keys.includes('status') && <label data-tip="Filter by status"><span>Status</span><select className="select" value={f.status} onChange={s('status')}>{['All', ...statusOpts].map((x) => { const [v, l] = typeof x === 'string' ? [x, x] : x; return <option key={v} value={v}>{l}</option>; })}</select></label>}
       {keys.includes('lga') && <label data-tip="Filter by local government area"><span>LGA</span><select className="select" value={f.lga} onChange={s('lga')}>{['All', ...LGAS].map((x) => <option key={x}>{x}</option>)}</select></label>}
       {keys.includes('group') && <label data-tip="Filter by Homeland group"><span>Group</span><select className="select" value={f.group} onChange={s('group')}><option value="">All Groups</option><option value="none">Un-assigned</option>{groups.map((g) => <option key={g.publicId} value={g.publicId}>{g.name}</option>)}</select></label>}
       {keys.includes('category') && <label data-tip="Filter by report category"><span>Category</span><select className="select" value={f.category} onChange={s('category')}>{['All', ...cats].map((x) => <option key={x}>{x}</option>)}</select></label>}
@@ -72,6 +74,7 @@ export function ListView({ section, child }: { section: string; child: string })
   const [assign, setAssign] = useState<{ ids: string[]; clear?: () => void } | null>(null);
   const [modal, setModal] = useState<{ kind: 'group' | 'category' | 'admin'; row?: Row } | null>(null);
   const [temp, setTemp] = useState<{ email: string; pw: string } | null>(null);
+  const [tview, setTview] = useState<{ rows: Row[]; narrowed: boolean; marked: Row[] } | null>(null);
   const fkeys = useMemo(() => filtersFor(key), [key]);
 
   const query = useMemo(() => {
@@ -169,8 +172,10 @@ export function ListView({ section, child }: { section: string; child: string })
     case 'reports.users': case 'reports.agents': case 'reports.call-centre': case 'reports.ecc': {
       const open = (r: Row) => !['resolved', 'fake'].includes(r.status);
       // Actions column starts with the Agent (Send to Vigilante) icon, then Dispatch / Acted / Resolve / Fake.
+      // Acted Upon list: no Send to Vigilante — the report has already been worked on the ground.
+      const vigOk = key !== 'reports.acted';
       actions = (r) => open(r) ? <span className="row-acts">
-        <button className="btn btn-sm btn-agent" disabled={!ops} onClick={(e) => { e.stopPropagation(); setVig(r._id!); }} data-tip={ops ? 'Send to Vigilante — verify, confirm or resolve' : 'Read-only role'} aria-label="Send to Vigilante"><UserRoundSearch size={14} /></button>
+        {vigOk && <button className="btn btn-sm btn-agent" disabled={!ops} onClick={(e) => { e.stopPropagation(); setVig(r._id!); }} data-tip={ops ? 'Send to Vigilante — verify, confirm or resolve' : 'Read-only role'} aria-label="Send to Vigilante"><UserRoundSearch size={14} /></button>}
         {['new', 'dispatched'].includes(r.status) && <B tone="btn-blue" icon={<Send size={13} />} label={key === 'reports.new' ? 'Dispatch' : undefined} tip="Choose agencies and dispatch" onClick={() => setDispatching([r])} />}
         {r.status === 'dispatched' && <B tone="btn-teal" icon={<ShieldCheck size={13} />} tip="Mark acted upon" onClick={() => incStatus([r._id!], 'acted', undefined, [r])} />}
         <B tone="btn-success" icon={<CheckCircle2 size={13} />} label={key === 'reports.new' ? undefined : 'Resolve'} tip="Resolve report" onClick={() => incStatus([r._id!], 'resolved', undefined, [r])} />
@@ -196,7 +201,7 @@ export function ListView({ section, child }: { section: string; child: string })
       actions = (r) => <B tone="btn-danger" icon={<Trash2 size={13} />} tip="Delete alert" onClick={() => del(`/alerts/${r._id}`, 'security alert')} />; break;
   }
 
-  const statusOpts = key === 'alarms.duress' || key === 'alarms.panic' ? ['resolved'] : section === 'alarms' ? ['new', 'resolved'] : ['active', 'pending', 'suspended'];
+  const statusOpts: Opt[] = SOURCE_PAGE[key] ? [...INC_STATUS] : key === 'alarms.duress' || key === 'alarms.panic' ? ['resolved'] : section === 'alarms' ? ['new', 'resolved'] : ['active', 'pending', 'suspended'];
   const subtitle = key === 'agents.new' ? 'Onboard a new local agent — or import many from CSV'
     : key === 'reports.analytics' ? 'Totals, charts and a CSV pack over any date range (Africa/Lagos)'
     : key === 'users.generate' ? 'Filter by status, LGA and period, then export the list as CSV'
@@ -211,11 +216,11 @@ export function ListView({ section, child }: { section: string; child: string })
       {!NO_TABLE.has(key) && <FilterBar keys={fkeys} f={f} setF={setF} statusOpts={statusOpts} />}
       {key === 'agents.map' && <AgentMap filters={query} />}
       {key === 'reports.map' && <IncidentMap />}
-      {SOURCE_PAGE[key] && <SourceCards active={SOURCE_PAGE[key]} />}
+      {SOURCE_PAGE[key] && <SourceCards active={SOURCE_PAGE[key]} query={query} view={data ? tview : null} />}
       {!NO_TABLE.has(key) && (
         <DataTable columns={data?.columns || []} rows={data?.rows || []} total={data?.total} loading={!data} exportName={`${key.replace('.', '-')}${query.replace(/take=\d+&?/, '') ? '-filtered' : ''}`}
           linkKey={LINK_OVERRIDE[key] || LINK_KEY[section]} actions={actions} bulk={ops ? bulk : undefined} toolbar={toolbar}
-          importKind={ops ? IMPORT[key] : undefined} onImported={done} />
+          importKind={ops ? IMPORT[key] : undefined} onImported={done} onView={SOURCE_PAGE[key] ? setTview : undefined} />
       )}
       {dispatching && <DispatchOverlay reports={dispatching} onClose={() => setDispatching(null)} onDone={done} />}
       {vig && <VigilanteOverlay incidentId={vig} onClose={() => setVig(null)} onDone={done} />}
@@ -228,21 +233,34 @@ export function ListView({ section, child }: { section: string; child: string })
   );
 }
 
-/** Report-source cards (User / Agent / Call Centre / ECC) — the active page's card is marked; others link across. */
-function SourceCards({ active }: { active: string }) {
-  const [d, setD] = useState<{ key: string; label: string; total: number; today: number; byStatus: Record<string, number> }[] | null>(null);
-  const load = useCallback(() => { api<any>('/reports/sources').then(setD).catch(() => setD([])); }, []);
-  useEffect(load, [load]);
+type SrcStat = { key: string; label: string; total: number; today: number; byStatus: Record<string, number> };
+/** Report-source cards (User / Agent / Call Centre / ECC). Counts follow the page filters (status, LGA, category, period);
+ *  the active card also follows the table search / column filter and shows how many rows are marked. Cards link across, keeping filters. */
+function SourceCards({ active, query, view }: { active: string; query: string; view: { rows: Row[]; narrowed: boolean; marked: Row[] } | null }) {
+  const [d, setD] = useState<SrcStat[] | null>(null);
+  const qs = useMemo(() => { const q = new URLSearchParams(query); q.delete('take'); return q.toString(); }, [query]);
+  const load = useCallback(() => { api<SrcStat[]>(`/reports/sources${qs ? `?${qs}` : ''}`).then(setD).catch(() => setD([])); }, [qs]);
+  useEffect(() => { setD(null); load(); }, [load]);
   useLive(['incidents', 'reports'], load);
+  const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Lagos' });
+  const fromRows = (x: SrcStat, rows: Row[]): SrcStat => {
+    const byStatus: Record<string, number> = {}; rows.forEach((r) => (byStatus[r.status] = (byStatus[r.status] || 0) + 1));
+    const today = rows.filter((r) => r._ts && new Date(r._ts).toLocaleDateString('en-CA', { timeZone: 'Africa/Lagos' }) === todayKey).length;
+    return { ...x, total: rows.length, today, byStatus };
+  };
+  const n = (v: number) => v.toLocaleString('en-NG');
   return (
     <div className="src-cards">
-      {(d || SOURCES.map(([k, l]) => ({ key: k, label: l, total: 0, today: 0, byStatus: {} as Record<string, number> }))).map((x) => {
+      {(d || SOURCES.map(([k, l]) => ({ key: k, label: l, total: 0, today: 0, byStatus: {} as Record<string, number> }))).map((x0) => {
+        const on = active === x0.key;
+        const x = on && view?.narrowed ? fromRows(x0, view.rows) : x0;
         const st = SOURCE_STYLE[x.key]; const open = (x.byStatus.new || 0) + (x.byStatus.dispatched || 0) + (x.byStatus.acted || 0);
         return (
-          <Link key={x.key} href={st.href} className={`card src-card ${active === x.key ? 'on' : ''}`} style={{ ['--acc' as any]: st.accent }} aria-current={active === x.key ? 'page' : undefined}>
+          <Link key={x.key} href={`${st.href}${qs ? `?${qs}` : ''}`} className={`card src-card card-select ${on ? 'is-active' : ''}`} style={{ ['--acc' as any]: st.accent }} aria-current={on ? 'page' : undefined}
+            data-tip={on && view?.narrowed ? 'Counts follow the page filters and the table search' : 'Counts follow the page filters'}>
             <KpiIcon name={st.icon} accent={st.accent} />
-            <div className="src-body"><small>{x.label === 'User' ? 'From Users' : x.label === 'Agent' ? 'From Agents' : x.label}</small><b>{d ? x.total.toLocaleString('en-NG') : '—'}</b>
-              <span className="src-sub"><i className="dot-new" />{(x.byStatus.new || 0).toLocaleString('en-NG')} new · {open.toLocaleString('en-NG')} open · {(x.byStatus.resolved || 0).toLocaleString('en-NG')} resolved · {x.today} today</span></div>
+            <div className="src-body"><small>{x.label === 'User' ? 'From Users' : x.label === 'Agent' ? 'From Agents' : x.label}{on && view?.marked.length ? <em className="src-marked">{n(view.marked.length)} marked</em> : null}</small><b>{d ? n(x.total) : '—'}</b>
+              <span className="src-sub"><i className="dot-new" />{n(x.byStatus.new || 0)} new · {n(open)} open · {n(x.byStatus.resolved || 0)} resolved · {n(x.today)} today</span></div>
           </Link>
         );
       })}

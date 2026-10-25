@@ -90,7 +90,7 @@ export function Analytics() {
         {(a?.bySource || Object.keys(SRC).map((k) => ({ key: k, name: '', count: 0, open: 0, resolved: 0, fake: 0 }))).map((x) => {
           const st = SRC[x.key]; const tot = a?.bySource?.reduce((n, y) => n + y.count, 0) || 0; const pct = tot ? Math.round((x.count / tot) * 100) : 0;
           return (
-            <button key={x.key} className={`card src-card ${f.source === x.key ? 'on' : ''}`} style={{ ['--acc' as any]: st.accent }} disabled={!a} onClick={() => setDrill({ kind: 'reports.all', title: `${st.label} reports`, query: inc({ source: x.key }) })} data-tip={`${st.label}: ${x.open} open · ${x.resolved} resolved · ${x.fake} fake`}>
+            <button key={x.key} className={`card src-card card-select ${f.source === x.key ? 'is-active' : ''}`} style={{ ['--acc' as any]: st.accent }} disabled={!a} onClick={() => setDrill({ kind: 'reports.all', title: `${st.label} reports`, query: inc({ source: x.key }) })} data-tip={`${st.label}: ${x.open} open · ${x.resolved} resolved · ${x.fake} fake`}>
               <KpiIcon name={st.icon} accent={st.accent} />
               <div className="src-body"><small>{st.label}</small><b>{a ? x.count.toLocaleString('en-NG') : '—'}<em>{a ? `${pct}%` : ''}</em></b>
                 <span className="src-sub">{x.open} open · {x.resolved} resolved · {x.fake} fake</span>

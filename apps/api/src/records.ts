@@ -304,7 +304,7 @@ export class RecordsController {
   async sources(@Query() q: Q) {
     let created: { gte?: Date; lt?: Date } | undefined;
     try { created = rangeFor(q.period, q.from, q.to); } catch { throw new BadRequestException('Dates must be YYYY-MM-DD'); }
-    const where: Prisma.IncidentWhereInput = { ...(created ? { createdAt: created } : {}), ...(q.lga && q.lga !== 'All' ? { lga: q.lga } : {}) };
+    const where: Prisma.IncidentWhereInput = { ...(created ? { createdAt: created } : {}), ...(q.lga && q.lga !== 'All' ? { lga: q.lga } : {}), ...(q.category && q.category !== 'All' ? { category: q.category } : {}), ...(q.status && q.status !== 'All' ? { status: { in: q.status.split(',') } } : {}) };
     const g = await this.prisma.incident.groupBy({ by: ['source', 'status'], where, _count: true });
     const today = lagosDayStart(dayKey(new Date()));
     const t = await this.prisma.incident.groupBy({ by: ['source'], where: { ...where, createdAt: { ...(created || {}), gte: created?.gte && created.gte > today ? created.gte : today } }, _count: true });

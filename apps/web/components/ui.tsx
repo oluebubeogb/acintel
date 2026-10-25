@@ -105,13 +105,15 @@ export function PageSizeControl({ value, onChange }: { value: number; onChange: 
   );
 }
 
-export function DataTable({ columns, rows, loading, exportName, linkKey, actions, importKind, onImported, total, toolbar, bulk, scroll }: {
+export function DataTable({ columns, rows, loading, exportName, linkKey, actions, importKind, onImported, total, toolbar, bulk, scroll, onView }: {
   columns: Col[]; rows: Row[]; loading?: boolean; exportName: string; linkKey?: string; total?: number;
   actions?: (row: Row) => React.ReactNode; importKind?: string; onImported?: () => void; toolbar?: React.ReactNode;
   /** Bulk actions for marked rows. Return buttons; call clear() after a successful action. */
   bulk?: (ids: string[], clear: () => void, rows: Row[]) => React.ReactNode;
   /** Inner scroll with a max height — only for pages/overlays that stack several tables. Single-table pages paginate instead. */
   scroll?: boolean;
+  /** Reports the rows currently visible after table search / column filter, whether those narrow the set, and the marked rows. */
+  onView?: (v: { rows: Row[]; narrowed: boolean; marked: Row[] }) => void;
 }) {
   const { pageSize } = useApp();
   const [importing, setImporting] = useState(false);
@@ -142,6 +144,7 @@ export function DataTable({ columns, rows, loading, exportName, linkKey, actions
   const view = filtered.slice(page * size, page * size + size);
   const toggleMark = (id: string) => setMarked((m) => { const n = new Set(m); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const exportRows = marked.size ? filtered.filter((r, i) => marked.has(rowId(r, i))) : filtered;
+  useEffect(() => { onView?.({ rows: filtered, narrowed: !!q.trim() || !!(filterCol && filterVal), marked: marked.size ? filtered.filter((r, i) => marked.has(rowId(r, i))) : [] }); }, [filtered, marked, q, filterCol, filterVal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="card dt-card">

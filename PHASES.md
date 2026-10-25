@@ -130,3 +130,12 @@ _Status: Phases 0–6 are complete and verified locally on 25 Oct 2026. Phase 7 
 - **Send to Vigilante** is per incident; there is no bulk (multi-incident) vigilante send yet. The agent mobile push is the `DataPort.pushVigilante` no-op until Phase 7.
 - **AI answer quality** depends on the model you point at. Tool calls give the best answers; models without tool support fall back to a plain reply built from engine data.
 - **Not yet run under a Docker daemon**, because this build box has none. The first `docker compose up` on Coolify is the end-to-end check.
+
+## UI polish 3
+- **One active-card style.** New shared `.card-select` / `.card-select.is-active` pattern in `globals.css` (accent via `--acc`): a 1px hairline when idle; when active, a 2px accent ring, a faint accent tint and a soft accent glow. It is used by the nav parent tiles (tone → `--acc`), the day-overlay KPI cards (each card's own accent), and the report-source cards on the From* pages and Analytics. The one-off `.day-card.on` and `.src-card.on` rules were removed.
+- **Acted Upon list.** No Send to Vigilante action; Dispatch, Resolve and Fake behave as before. Vigilante stays on New, Dispatched, the source pages and the incident page.
+- **From* pages** (users / agents / call-centre / ecc):
+  - A new **Status** filter (New, Dispatched, Acted Upon, Resolved) feeds the list query.
+  - `GET /reports/sources` now accepts `status` and `category` as well as period, from/to and lga. The source cards refetch on every filter change, so the totals and sub-lines (new · open · resolved · today) reflect the filtered set.
+  - The active card also follows the table search and column filter (counts come from the visible rows) and shows a "N marked" pill when rows are ticked.
+  - Clicking a card switches source and keeps the filters in the URL.

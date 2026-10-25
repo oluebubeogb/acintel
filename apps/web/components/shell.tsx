@@ -96,7 +96,7 @@ function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }
           const Icon = NAV_ICONS[n.icon];
           return (
             <Fragment key={n.key}>
-              <button className={`tile tone-${n.tone} ${active === n.key ? 'active' : ''}`} onClick={() => setActive((a) => (a === n.key ? '' : n.key))} data-tip={n.full} aria-pressed={active === n.key} aria-expanded={active === n.key}>
+              <button className={`tile card-select tone-${n.tone} ${active === n.key ? 'active is-active' : ''}`} onClick={() => setActive((a) => (a === n.key ? '' : n.key))} data-tip={n.full} aria-pressed={active === n.key} aria-expanded={active === n.key}>
                 <span className="ico"><Icon size={20} strokeWidth={2} /></span>
                 <span className="t-label">{n.short}</span>
                 <CountBadge n={counts.parents[n.key]} />

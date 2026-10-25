@@ -150,7 +150,7 @@ export function DayOverlay({ date, entity, onClose }: { date: string; entity?: s
         <>
           <div className="day-cards">
             {cards.map((c) => c.list ? (
-              <button key={c.k} type="button" className={`card day-card sel ${tab === c.k ? 'on' : ''}`} style={{ ['--acc' as any]: c.accent }} aria-pressed={tab === c.k} onClick={() => setTab(c.k)} data-tip={`Show ${c.label.toLowerCase()}`}>
+              <button key={c.k} type="button" className={`card day-card card-select ${tab === c.k ? 'is-active' : ''}`} style={{ ['--acc' as any]: c.accent }} aria-pressed={tab === c.k} onClick={() => setTab(c.k)} data-tip={`Show ${c.label.toLowerCase()}`}>
                 <KpiIcon name={c.icon} accent={c.accent} /><span><small>{c.label}</small><b>{c.count}</b></span>
               </button>
             ) : (
