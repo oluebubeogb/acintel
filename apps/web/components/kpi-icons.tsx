@@ -71,7 +71,39 @@ const Chart = ({ c, c2 }: P) => (<>
   <rect x="21.5" y="18" width="5" height="17" rx="1.5" fill={c} fillOpacity=".75" />
   <rect x="30" y="13" width="5" height="22" rx="1.5" fill={c2} stroke={c} strokeWidth="1.8" />
 </>);
-export const KPI_ICONS = { doc: Doc, truck: Truck, checklist: Checklist, seal: Seal, agent: Agent, suspended: Suspended, pending: Pending, siren: Siren, clock: Clock, users: Users, chart: Chart };
+const SendI = ({ c, c2 }: P) => (<>
+  <path d="M6 22.5L41 8l-9.5 33-8.2-11.6z" fill={c2} stroke={c} strokeWidth="2" strokeLinejoin="round" />
+  <path d="M23.3 29.4L41 8 14.5 26.5z" fill="#fff" stroke={c} strokeWidth="2" strokeLinejoin="round" />
+  <path d="M23.3 29.4l-2.8 9.1 6.1-4.4" fill={c} fillOpacity=".55" stroke={c} strokeWidth="1.6" strokeLinejoin="round" />
+</>);
+const Headset = ({ c, c2 }: P) => (<>
+  <path d="M10 26v-3a14 14 0 0 1 28 0v3" stroke={c} strokeWidth="2.4" strokeLinecap="round" fill="none" />
+  <rect x="7" y="24" width="8" height="12" rx="3" fill={c2} stroke={c} strokeWidth="2" />
+  <rect x="33" y="24" width="8" height="12" rx="3" fill={c2} stroke={c} strokeWidth="2" />
+  <path d="M37 36c0 4-4 6-9 6" stroke={c} strokeWidth="2" strokeLinecap="round" fill="none" />
+  <rect x="21" y="39.5" width="8" height="5" rx="2.5" fill={c} />
+</>);
+const Radio = ({ c, c2 }: P) => (<>
+  <rect x="11" y="16" width="26" height="27" rx="4" fill={c2} stroke={c} strokeWidth="2" />
+  <path d="M16 16V6" stroke={c} strokeWidth="2.4" strokeLinecap="round" />
+  <rect x="15.5" y="21" width="17" height="8" rx="2" fill="#fff" stroke={c} strokeWidth="1.8" />
+  <circle cx="18.5" cy="36" r="2.2" fill={c} /><circle cx="24" cy="36" r="2.2" fill={c} fillOpacity=".6" /><circle cx="29.5" cy="36" r="2.2" fill={c} fillOpacity=".35" />
+  <path d="M38 8a9 9 0 0 1 3.5 7M35.5 11a5 5 0 0 1 2 4" stroke={c} strokeOpacity=".6" strokeWidth="2" strokeLinecap="round" fill="none" />
+</>);
+const UserI = ({ c, c2 }: P) => (<>
+  <circle cx="24" cy="16" r="8" fill={c2} stroke={c} strokeWidth="2" />
+  <path d="M9 41c1.6-8.4 7.4-13 15-13s13.4 4.6 15 13z" fill="#fff" stroke={c} strokeWidth="2" strokeLinejoin="round" />
+  <path d="M19 35h10" stroke={c} strokeOpacity=".5" strokeWidth="2" strokeLinecap="round" />
+</>);
+const Login = ({ c, c2 }: P) => (<>
+  <path d="M26 7h10a4 4 0 0 1 4 4v26a4 4 0 0 1-4 4H26" fill={c2} stroke={c} strokeWidth="2" strokeLinecap="round" />
+  <path d="M7 24h22M22 16.5L29.5 24 22 31.5" stroke={c} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+</>);
+const Gear = ({ c, c2 }: P) => (<>
+  <path d="M21 5h6l1 5 4 2 4.5-2.6 4.2 4.2L38 18l2 4 5 1v6l-5 1-2 4 2.7 4.4-4.2 4.2L32 40l-4 2-1 5h-6l-1-5-4-2-4.5 2.6-4.2-4.2L10 34l-2-4-5-1v-6l5-1 2-4-2.7-4.4 4.2-4.2L16 12l4-2z" fill={c2} stroke={c} strokeWidth="2" strokeLinejoin="round" transform="scale(.92) translate(2 0)" />
+  <circle cx="24" cy="24" r="6.5" fill="#fff" stroke={c} strokeWidth="2.2" />
+</>);
+export const KPI_ICONS = { send: SendI, headset: Headset, radio: Radio, user: UserI, login: Login, gear: Gear,  doc: Doc, truck: Truck, checklist: Checklist, seal: Seal, agent: Agent, suspended: Suspended, pending: Pending, siren: Siren, clock: Clock, users: Users, chart: Chart };
 export type KpiIconName = keyof typeof KPI_ICONS;
 
 /** Soft tinted tile with an illustrated icon; colours derive from the card accent. */

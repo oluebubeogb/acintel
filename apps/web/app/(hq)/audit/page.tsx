@@ -38,7 +38,9 @@ export default function AuditPage() {
       toast(r.undone ? `Undone ${r.undone} change(s)` : r.errors?.[0] || 'Nothing to undo', r.undone ? 'success' : 'error'); load();
     } catch (e: any) { toast(e.message, 'error'); }
   };
-  const actors = [...new Set((data?.rows || []).map((r) => r.actor).filter(Boolean))];
+  // Filter by email (stable), label by admin name.
+  const actorMap = new Map<string, string>((data?.rows || []).filter((r) => r._actorEmail).map((r) => [r._actorEmail, r.actor || r._actorEmail]));
+  const actors = [...actorMap.keys()];
   // Audit rows share the entity id; key them by audit id so marking/undo is per change.
   const rows: Row[] = (data?.rows || []).map((r) => ({ ...r, _entity: r._id, _id: r._auditId }));
   const columns = (data?.columns || []).map((c) => c);
@@ -50,7 +52,7 @@ export default function AuditPage() {
         <label><span>Action</span><select className="input" value={f.action} onChange={(e) => setF({ ...f, action: e.target.value })}>
           <option value="">All Actions</option>{actions.map((a) => <option key={a.action} value={a.action}>{a.label || a.action} ({a.count})</option>)}</select></label>
         <label><span>Admin</span><select className="input" value={f.actor} onChange={(e) => setF({ ...f, actor: e.target.value })}>
-          <option value="">Everyone</option>{[...new Set([f.actor, ...actors].filter(Boolean))].map((a) => <option key={a} value={a}>{a}</option>)}</select></label>
+          <option value="">Everyone</option>{[...new Set([f.actor, ...actors].filter(Boolean))].map((a) => <option key={a} value={a}>{actorMap.get(a) && actorMap.get(a) !== a ? `${actorMap.get(a)} — ${a}` : a}</option>)}</select></label>
         <label><span>Period</span><select className="input" value={f.period} onChange={(e) => setF({ ...f, period: e.target.value })}>
           {PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
         <button className="btn btn-ghost" onClick={() => setF({ action: '', actor: '', period: 'last_30_days' })} data-tip="Reset filters"><RotateCcw size={14} /> Reset</button>

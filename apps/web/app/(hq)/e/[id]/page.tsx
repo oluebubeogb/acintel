@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowUpRight, Ban, CalendarDays, CheckCircle2, ExternalLink, FileText, Fingerprint, ImagePlus, KeyRound, Link2, Pencil, Send, ShieldCheck, Trash2, UserCheck, Users, XCircle } from 'lucide-react';
+import { ArrowUpRight, Ban, Bot, CalendarDays, MessageSquareQuote, RefreshCw, Sparkles, UserRoundSearch, CheckCircle2, ExternalLink, FileText, Fingerprint, ImagePlus, KeyRound, Link2, Pencil, Send, ShieldCheck, Trash2, UserCheck, Users, XCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { PageHead } from '@/components/shell';
 import { DataTable, Row, Col } from '@/components/ui';
@@ -11,6 +11,7 @@ import { MiniIcon } from '@/components/mini-icon';
 import { useApp, useLive } from '@/components/providers';
 import { AdminModal, AssignModal, CategoryModal, EditAgentModal, GroupModal, TempPassword } from '@/components/forms';
 import { GeoMap } from '@/components/geomap';
+import { VigilanteOverlay } from '@/components/vigilante';
 
 type Media = { id: string; kind: string; url: string; filename: string; by: string; date: string; storage: string };
 type Ent = { type: string; tag: string; title: string; subtitle?: string; status?: string; fields: Record<string, any>; links?: Record<string, string | undefined>; dates?: Record<string, string | null>;
@@ -21,7 +22,7 @@ type Stat = { label: string; value: string | number; accent: string; icon: strin
 const dayOf = (ts: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Lagos' }).format(new Date(ts));
 const TL_COLS: Col[] = [{ key: 'date', label: 'When' }, { key: 'actor', label: 'By' }, { key: 'action', label: 'Action' }, { key: 'summary', label: 'Summary' }];
 const ACT_KEYS = [{ key: 'reports', label: 'reports' }, { key: 'alarms', label: 'alarms' }];
-const LIVE: Record<string, string[]> = { user: ['users'], agent: ['agents'], incident: ['incidents'], alarm: ['alarms'], group: ['groups', 'agents'], category: ['categories'], admin: ['admins'], alert: ['alerts'] };
+const LIVE: Record<string, string[]> = { user: ['users'], agent: ['agents'], incident: ['incidents', 'reports', 'agents'], alarm: ['alarms'], group: ['groups', 'agents'], category: ['categories'], admin: ['admins'], alert: ['alerts'] };
 
 function Activity({ days, keys, onDay }: { days: NonNullable<Ent['activity']>; keys: { key: string; label: string }[]; onDay: (d: string) => void }) {
   const sum = (d: Record<string, any>) => keys.reduce((n, k) => n + (Number(d[k.key]) || 0), 0);
@@ -79,12 +80,39 @@ function MediaPanel({ id, media, ops, onChange }: { id: string; media: Media[]; 
   );
 }
 
+/** Under the map: AI summary (narrower, left) beside the reporter's original words (wider, right). */
+function IncidentText({ raw, id, ops, onChange }: { raw: any; id: string; ops: boolean; onChange: () => void }) {
+  const { toast } = useApp();
+  const [busy, setBusy] = useState(false);
+  const ai = !!raw.aiSummary;
+  const regen = async () => {
+    setBusy(true);
+    try { await api(`/incidents/${id}/ai`, { method: 'POST' }); toast('AI summary updated'); onChange(); } catch (x: any) { toast(x.message, 'error'); } finally { setBusy(false); }
+  };
+  return (
+    <div className="ai-split">
+      <div className="card card-pad ai-card">
+        <div className="ai-head"><span className="ai-ico"><Sparkles size={15} /></span><div><h3>{ai ? 'AI Summary' : 'Summary'}</h3><p>{ai ? `Generated ${raw.aiAt || ''}` : 'Local summary · AI pending or not configured'}</p></div>
+          {ops && <button className="btn btn-sm btn-ghost" style={{ marginLeft: 'auto' }} disabled={busy} onClick={regen} data-tip="Re-generate the headline and summary with AI"><RefreshCw size={13} className={busy ? 'spin' : ''} /></button>}</div>
+        <div className="ai-title">{raw.title}</div>
+        <p className="ai-body">{raw.aiSummary || raw.localSummary}</p>
+        <div className="ai-foot">{ai ? <span className="chip violet"><Bot size={12} /> AI</span> : <span className="chip">Local summary</span>}<span className="chip">{raw.category}</span><span className="chip">{raw.lga}</span></div>
+      </div>
+      <div className="card card-pad orig-card">
+        <div className="ai-head"><span className="ai-ico orig"><MessageSquareQuote size={15} /></span><div><h3>Reporter&apos;s Original Report</h3><p>Exactly as submitted · {raw.date}</p></div></div>
+        <blockquote className="orig-body">{raw.details}</blockquote>
+        <div className="ai-foot"><span className="who-line">{raw.reporterHref ? <Link className="cell-link" href={raw.reporterHref}>{raw.reporter}</Link> : <b>{raw.reporter}</b>}<span className={`role-tag rt-${raw.source || 'user'}`}>{raw.sourceLabel}</span></span><span className="hint">{raw.location}</span></div>
+      </div>
+    </div>
+  );
+}
+
 export default function EntityPage({ params }: { params: { id: string } }) {
   const { can, confirm, toast, refreshCounts, openDay } = useApp();
   const ops = can('ops');
   const [e, setE] = useState<Ent | null>(null);
   const [err, setErr] = useState('');
-  const [ui, setUi] = useState<'' | 'dispatch' | 'edit' | 'assign'>('');
+  const [ui, setUi] = useState<'' | 'dispatch' | 'edit' | 'assign' | 'vigilante'>('');
   const [temp, setTemp] = useState<{ email: string; pw: string } | null>(null);
   const [drill, setDrill] = useState<NonNullable<Stat['drill']> | null>(null);
   const load = useCallback(() => api<Ent>(`/entity/${params.id}`).then(setE).catch((x) => setErr(x.status === 404 ? 'Record not found' : x.message)), [params.id]);
@@ -110,7 +138,8 @@ export default function EntityPage({ params }: { params: { id: string } }) {
   };
   let actions: React.ReactNode = null;
   if (e.type === 'incident') actions = <>
-    {st === 'new' && <B tone="btn-primary" icon={<Send size={15} />} label="Dispatch" tip="Choose agencies and dispatch" on={() => setUi('dispatch')} />}
+    {['new', 'dispatched', 'acted'].includes(st) && <B tone="btn-agent-solid" icon={<UserRoundSearch size={15} />} label="Send to Vigilante" tip="Ask nearby agents to verify, confirm or resolve" on={() => setUi('vigilante')} />}
+    {['new', 'dispatched'].includes(st) && <B tone="btn-blue" icon={<Send size={15} />} label="Dispatch" tip="Choose agencies and dispatch" on={() => setUi('dispatch')} />}
     {st === 'dispatched' && <B icon={<ShieldCheck size={15} />} label="Acted Upon" on={() => incAct('acted')} />}
     {['new', 'dispatched', 'acted'].includes(st) && <><B tone="btn-success" icon={<CheckCircle2 size={15} />} label="Resolve" on={() => incAct('resolved')} /><B tone="btn-danger" icon={<XCircle size={15} />} label="Fake" tip="Mark as fake (reason required)" on={() => incAct('fake')} /></>}</>;
   if (e.type === 'user') actions = st === 'pending' ? <><B tone="btn-success" icon={<CheckCircle2 size={15} />} label="Approve" on={() => statusAct('active', 'Approve')} /><B tone="btn-danger" icon={<Ban size={15} />} label="Suspend" on={() => statusAct('suspended', 'Suspend')} /></>
@@ -155,11 +184,13 @@ export default function EntityPage({ params }: { params: { id: string } }) {
         {e.geo && <div><GeoMap mini pins={[{ id: params.id, lat: e.geo.lat, lng: e.geo.lng, color: e.type === 'alarm' ? '#db2777' : e.type === 'agent' ? (e.geo.online ? '#10b981' : '#94a3b8') : '#f59e0b', pulse: e.type === 'alarm' || !!e.geo.online, big: true, title: e.geo.label }]} />
           <a className="hint" style={{ display: 'inline-flex', gap: 4, marginTop: 6 }} href={`https://www.openstreetmap.org/?mlat=${e.geo.lat}&mlon=${e.geo.lng}#map=16/${e.geo.lat}/${e.geo.lng}`} target="_blank" rel="noreferrer"><ExternalLink size={12} /> {e.geo.lat.toFixed(5)}, {e.geo.lng.toFixed(5)}</a></div>}
       </div>
+      {e.type === 'incident' && e.raw && <IncidentText raw={e.raw} id={params.id} ops={ops} onChange={load} />}
       {e.activity && <Activity days={e.activity} keys={e.activityKeys || ACT_KEYS} onDay={(d) => openDay(d, params.id)} />}
       {e.type === 'incident' && <MediaPanel id={params.id} media={e.media || []} ops={ops} onChange={load} />}
       {e.related.map((r) => <div key={r.title} style={{ marginBottom: 16 }}><h3 style={{ margin: '0 0 8px' }}>{r.title} <span className="chip">{r.rows.length}</span></h3><DataTable scroll columns={r.columns} rows={r.rows} linkKey={r.linkKey} exportName={`${e.type}-${r.title.toLowerCase().replace(/\s+/g, '-')}`} /></div>)}
       {!!e.timeline?.length && <div style={{ marginBottom: 16 }}><h3 style={{ margin: '0 0 8px' }}>Audit Trail <span className="chip">{e.timeline.length}</span></h3><DataTable scroll columns={TL_COLS} rows={e.timeline.map(({ _id, ...r }) => r)} exportName={`${e.type}-audit`} /></div>}
-      {ui === 'dispatch' && <DispatchOverlay report={{ _id: params.id, category: e.title, details: e.fields.Report, location: e.fields.Location, lga: e.fields.LGA, status: st, date: e.fields['Report Date'] }} onClose={() => setUi('')} onDone={done} />}
+      {ui === 'dispatch' && <DispatchOverlay report={{ _id: params.id, category: e.title, title: e.raw?.title, details: e.raw?.details, location: e.fields.Location, lga: e.fields.LGA, status: st, date: e.fields['Report Date'] }} onClose={() => setUi('')} onDone={done} />}
+      {ui === 'vigilante' && <VigilanteOverlay incidentId={params.id} onClose={() => setUi('')} onDone={done} />}
       {ui === 'edit' && e.type === 'agent' && <EditAgentModal raw={{ ...e.raw, groupId: e.raw?.groupId || '' }} id={params.id} onClose={() => setUi('')} onDone={done} />}
       {ui === 'edit' && e.type === 'group' && <GroupModal raw={e.raw} id={params.id} onClose={() => setUi('')} onDone={done} />}
       {ui === 'edit' && e.type === 'category' && <CategoryModal raw={e.raw} id={params.id} onClose={() => setUi('')} onDone={done} />}

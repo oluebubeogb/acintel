@@ -72,7 +72,7 @@ export class AiController {
   }
   private async fetchRows(f: Filters, take?: number) {
     const w = await this.where(f);
-    const inc = f.entity === 'agents' ? { group: true } : f.entity === 'incidents' ? { reporter: true } : f.entity === 'alarms' ? { user: true } : undefined;
+    const inc = f.entity === 'agents' ? { group: true } : f.entity === 'incidents' ? { reporter: true, agentReporter: true } : f.entity === 'alarms' ? { user: true } : undefined;
     const rows = await this.model(f.entity).findMany({ where: w, orderBy: { createdAt: 'desc' }, take, ...(inc ? { include: inc } : {}) });
     const map = f.entity === 'users' ? (r: any) => userRow(r) : f.entity === 'agents' ? agentRow : f.entity === 'incidents' ? incidentRow : alarmRow;
     const cols = f.entity === 'users' ? USER_COLS : f.entity === 'agents' ? AGENT_COLS : f.entity === 'incidents' ? INC_COLS : ALARM_COLS;

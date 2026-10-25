@@ -17,6 +17,10 @@ import { LGAS, normLga, pointIn } from './geo';
 import { StandaloneDataPort } from './dataport';
 import { assignAgents, syncTasks } from './tasks';
 import { actionLabel } from './rows';
+import { IncidentAiWorker, localTitle } from './incident-text';
+import { aiConfigured } from './llm';
+import { isOnline } from './rows';
+import { fmt } from './lagos';
 
 export const AGENCIES = [
   'FRSC', 'AVS', 'NIS', 'ARTSMA ADMIN', 'Military Navy/QRF', 'NDLEA', 'NPF-ABIA', 'ABIA DSS',
@@ -339,8 +343,83 @@ const recent = new Map<string, number>(); // dispatch double-submit guard
 
 @Controller('incidents')
 export class IncidentsController {
-  constructor(private prisma: PrismaService, private act: Activity) {}
+  constructor(private prisma: PrismaService, private act: Activity, private ai: IncidentAiWorker) {}
   @Get('agencies') agencies() { return AGENCIES; }
+
+  /** Bulk Dispatch Now: same rules as single dispatch, per report; returns per-report outcome. body: { ids, agencies, note } */
+  @Post('dispatch') @HttpCode(200) @RequirePerm('ops')
+  async dispatchMany(@Body() b: { ids?: string[]; agencies?: string[]; note?: string }, @CurrentAdmin() admin: AdminCtx) {
+    const ids = idList(b);
+    if (ids.length > 200) throw new BadRequestException('Dispatch at most 200 reports at once');
+    let ok = 0; const errors: string[] = [];
+    for (const id of ids) {
+      try { await this.dispatch(id, { agencies: b.agencies, note: b.note }, admin); ok++; }
+      catch (e: any) { if (e instanceof BadRequestException) throw e; errors.push(`${id}: ${e?.message || 'failed'}`); }
+    }
+    return { ok: true, dispatched: ok, skipped: errors.length, errors };
+  }
+
+  /**
+   * Send to Vigilante — nearby active agents for an incident. radius in km (default 4, max 50).
+   * Agents with no known location are returned too (distanceKm = null) so they can still be sent.
+   */
+  @Get(':publicId/nearby-agents')
+  async nearby(@Param('publicId') publicId: string, @Query('radius') radiusQ?: string, @Query('scope') scope?: string) {
+    const inc = await this.prisma.incident.findUnique({ where: { publicId }, include: { tasks: { select: { agentId: true, purpose: true, createdAt: true } } } });
+    if (!inc) throw new NotFoundException('Report not found');
+    const radius = Math.min(Math.max(Number(radiusQ) || 4, 0.5), 50);
+    const agents = await this.prisma.agent.findMany({ where: { status: 'active' }, include: { group: true } });
+    const sent = new Map(inc.tasks.map((t) => [t.agentId, t]));
+    const rows = agents.map((a) => {
+      const d = inc.lat != null && inc.lng != null && a.lat != null && a.lng != null ? haversine(inc.lat, inc.lng, a.lat, a.lng) : null;
+      return { id: a.publicId, name: a.name, phone: a.phone, email: a.email, tag: a.tag || '', agency: a.group?.name || 'Un-assigned', lga: a.lga, onboarded: fmt(a.createdAt), lastLogin: fmt(a.lastSeenAt), online: isOnline(a.lastSeenAt),
+        lat: a.lat, lng: a.lng, distanceKm: d == null ? null : +d.toFixed(2), sent: sent.has(a.id), sentAt: sent.get(a.id) ? fmt(sent.get(a.id)!.createdAt) : null };
+    });
+    // In range = within the radius; agents without coordinates are listed when they're deployed in the incident LGA.
+    const near = rows.filter((r) => (r.distanceKm != null ? r.distanceKm <= radius : scope === 'all' || r.lga === inc.lga))
+      .sort((x, y) => (x.distanceKm ?? 1e9) - (y.distanceKm ?? 1e9) || Number(y.online) - Number(x.online));
+    return { incident: { id: inc.publicId, category: inc.category, title: inc.aiTitle || localTitle(inc.details, inc.category), location: inc.location, lga: inc.lga, lat: inc.lat, lng: inc.lng, status: inc.status },
+      radius, total: near.length, noLocation: near.filter((r) => r.distanceKm == null).length, alreadySent: inc.tasks.length, agents: near.slice(0, 300) };
+  }
+
+  /** Send to Vigilante: assign the selected agents to verify / confirm / resolve this incident. body: { agentIds, purpose, note } */
+  @Post(':publicId/vigilante') @HttpCode(200) @RequirePerm('ops')
+  async vigilante(@Param('publicId') publicId: string, @Body() b: { agentIds?: string[]; purpose?: string; note?: string }, @CurrentAdmin() admin: AdminCtx) {
+    const ids = Array.isArray(b.agentIds) ? [...new Set(b.agentIds.map(String))] : [];
+    if (!ids.length) throw new BadRequestException('Select at least one agent');
+    if (ids.length > 100) throw new BadRequestException('Send to at most 100 agents at once');
+    const purpose = ['verify', 'confirm', 'resolve'].includes(String(b.purpose)) ? String(b.purpose) : 'verify';
+    const note = str(b.note, 500) || null;
+    const inc = await this.prisma.incident.findUnique({ where: { publicId } });
+    if (!inc) throw new NotFoundException('Report not found');
+    if (['resolved', 'fake'].includes(inc.status)) throw new ConflictException(`This report is already ${inc.status}`);
+    const agents = await this.prisma.agent.findMany({ where: { publicId: { in: ids }, status: 'active' } });
+    if (!agents.length) throw new BadRequestException('None of the selected agents are active');
+    const existing = new Set((await this.prisma.agentTask.findMany({ where: { incidentId: inc.id, agentId: { in: agents.map((a) => a.id) } }, select: { agentId: true } })).map((t) => t.agentId));
+    const fresh = agents.filter((a) => !existing.has(a.id));
+    if (fresh.length) await this.prisma.agentTask.createMany({ data: fresh.map((a) => ({ agentId: a.id, incidentId: inc.id, assignedBy: admin.email, purpose, note })), skipDuplicates: true });
+    // Re-sending to an agent already on the incident refreshes the request (back to "assigned" with the new purpose).
+    if (existing.size) await this.prisma.agentTask.updateMany({ where: { incidentId: inc.id, agentId: { in: [...existing] } }, data: { status: 'assigned', purpose, note, assignedBy: admin.email, createdAt: new Date(), respondedAt: null, completedAt: null } });
+    const names = agents.map((a) => a.name);
+    await this.act.audit(admin, 'incident.vigilante', 'incident', inc.publicId, `Sent ${inc.category} (${inc.lga}) to ${agents.length} vigilante${agents.length > 1 ? 's' : ''} to ${purpose}: ${names.slice(0, 6).join(', ')}${names.length > 6 ? ` +${names.length - 6} more` : ''}`, null, { purpose, agents: agents.map((a) => a.publicId), note });
+    await this.act.notify('reports.dispatched', 'dispatch', `${inc.category} sent to ${agents.length} vigilante${agents.length > 1 ? 's' : ''}`, `To ${purpose} · ${inc.lga}`, `/e/${inc.publicId}`);
+    this.act.changed(['agents', 'reports'], inc.publicId);
+    await dataport.pushVigilante(inc.legacyId || inc.publicId, agents.map((a) => a.publicId), purpose); // no-op until Phase 7
+    return { ok: true, sent: agents.length, new: fresh.length, resent: existing.size, skipped: ids.length - agents.length, purpose };
+  }
+
+  /** (Re)generate the AI headline + summary for one incident (needs OPENAI_* configured). */
+  @Post(':publicId/ai') @HttpCode(200) @RequirePerm('ops')
+  async aiSummary(@Param('publicId') publicId: string, @CurrentAdmin() admin: AdminCtx) {
+    if (!aiConfigured()) throw new BadRequestException('AI is not configured — set OPENAI_BASE_URL and OPENAI_API_KEY on the API');
+    const inc = await this.prisma.incident.findUnique({ where: { publicId } });
+    if (!inc) throw new NotFoundException('Report not found');
+    const r = await this.ai.generate(inc.id);
+    if (!r) throw new BadRequestException('The AI model did not return a usable summary — try again shortly');
+    await this.act.audit(admin, 'incident.ai', 'incident', inc.publicId, `Generated AI summary: ${r.title}`);
+    this.act.changed(['reports'], inc.publicId);
+    return { ok: true, ...r };
+  }
 
   /**
    * Dispatch Now — hardened: validates agencies, only from new/dispatched, conditional update in a transaction
@@ -673,4 +752,12 @@ export class ImportController {
     }
     return { kind, dryRun: dry, total: report.length, valid: okRows, invalid: report.length - okRows, created, newGroups: [...toCreateGroups], rows: report.slice(0, 2000) };
   }
+}
+
+/** Great-circle distance in km. */
+export function haversine(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const R = 6371, t = Math.PI / 180;
+  const dLat = (lat2 - lat1) * t, dLng = (lng2 - lng1) * t;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * t) * Math.cos(lat2 * t) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
 }

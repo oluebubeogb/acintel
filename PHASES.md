@@ -94,10 +94,39 @@ _Status: Phases 0–6 are complete and verified locally on 25 Oct 2026. Phase 7 
 - **Analytics:** dashboard-style KPI cards; each drills into a modal with CSV and "Open as Page" (generic `/records?kind=…` page, also used by the dashboard and entity drills).
 - **AI assistant:** helper texts removed and the FAB hides while the panel is open (panel 26px from the bottom). Provider fixes for RunPod and other OpenAI-compatible endpoints: base-URL normalisation, RunPod queue polling, `/models` auto-discovery, retries on 429/5xx, `<think>` stripping, and a no-tools retry when a reply comes back empty. Errors are logged as `[AI]` and the user sees a short retry message instead of the old "offline mode" text. New env vars: `OPENAI_TIMEOUT_MS` (120000) and `OPENAI_MAX_TOKENS` (1024).
 
+## UI polish 2 (sources, vigilante, AI titles — Oct 2026)
+- **Day overlay** ("Engagements for the day"): colour-icon stat cards; the Reports / Alarms / New Users / New Agents / Admin Actions cards are the selector (no focus card, no tabs), and User Logins / Dispatches are static. The Admin Actions column no longer leaks into other tables, and admins show by **name**, with the email underneath and in a tooltip (audit tables and the audit actor filter too). The Admin Actions count now equals the rows listed.
+- **Incident lists:**
+  - The Actions column opens with a green **Agent** button (Send to Vigilante), followed by a white **Dispatch** button with a blue icon, then Acted, Resolve and Fake.
+  - The bulk bar order is "N selected" → Dispatch → Acted → Resolve → Fake. Bulk dispatch uses `POST /incidents/dispatch`.
+  - Confirm and dispatch overlays list incidents line by line: 5 shown with "Show N more", one clipped line each (84 chars).
+  - The **Report** column shows the AI title, with a local fallback.
+  - The reporter has an **Agent / User / Call Centre / ECC** tag.
+  - A source filter is available on every report list.
+- **Sources:** `Incident.source` (`user | agent | call_centre | ecc`, default `user`) plus `agentReporterId`.
+  - New nav pages **From Users / From Agents / Call Centre / ECC** sit under Incident Reports. Each has live per-source cards (`GET /reports/sources`).
+  - The simulator and demo seed generate a source mix. The seed backfills the old placeholder "reported around/near" texts with realistic narratives; real data is not touched.
+- **AI titles and summaries:** `IncidentAiWorker` (`apps/api/src/incident-text.ts`) fills `aiTitle` / `aiSummary` in the background when `OPENAI_*` is set. It runs every `INCIDENT_AI_INTERVAL_MS` (60000), and `INCIDENT_AI=false` turns it off. Without AI, a local title and summary are derived from the text. `POST /incidents/:id/ai` regenerates on demand (audited).
+- **Incident page:**
+  - Under the map, a two-column section: AI Summary on the left (narrower), and the reporter's original report on the right (wider), with the reporter link and source tag.
+  - The header has **Send to Vigilante** (green) and Dispatch (blue).
+  - New "Vigilantes Sent" table; sender names are shown, not emails.
+- **Send to Vigilante overlay** (from the table row or the incident page):
+  - A map with a radius ring: 2 / 4 / 8 / 15 km, default 4 km.
+  - Agent cards show name, phone, agency, LGA, Gov Tag, onboarded, last login, online dot, distance (N/A without a location), "already sent" state, and a Map button that flies to the agent.
+  - The admin can set the purpose (verify / confirm / resolve) and add a note, then select agents and send.
+  - API endpoints: `GET /incidents/:id/nearby-agents?radius=` (haversine; agents without coordinates in the same LGA are listed as N/A) and `POST /incidents/:id/vigilante`.
+  - On send, the API creates or re-sends `AgentTask` rows with `purpose` and `note`. Each send is audited as `incident.vigilante`, triggers an in-app notification, and pushes live `agents` / `reports` updates. It also calls `DataPort.pushVigilante`, which is a no-op until Phase 7.
+  - Flat colours, no gradients.
+- **Agent page:** new "Sent Reports" card, which drills into the reports filed by that agent.
+- **Analytics:** a Source filter, "By Source" drill cards (count, share, open/resolved/fake), an "Outcome by Source" stacked chart, and source rows in the CSV pack.
+- **Migration:** `20261025150000_sources_vigilante`.
+- **Screenshots:** `screenshots/polish2/`.
+
 ## Known gaps / notes
 - **Phase 7** (live Homeland read sync + dispatch write-back) is not implemented; `apps/api/src/dataport.ts` is still the no-op seam.
 - **Google Maps** is not a drop-in, for licensing reasons. `GOOGLE_MAPS_API_KEY` is reserved. For production, use a proper tile provider or self-hosted tiles rather than tile.openstreetmap.org.
 - **`group_admin`** is read-only in v1; it is not yet limited to its own groups.
-- **Day overlay:** the "Admin actions" stat can differ slightly from the tab count. The stat counts audit rows by actor; the tab includes rows about the user.
+- **Send to Vigilante** is per incident; there is no bulk (multi-incident) vigilante send yet. The agent mobile push is the `DataPort.pushVigilante` no-op until Phase 7.
 - **AI answer quality** depends on the model you point at. Tool calls give the best answers; models without tool support fall back to a plain reply built from engine data.
 - **Not yet run under a Docker daemon**, because this build box has none. The first `docker compose up` on Coolify is the end-to-end check.

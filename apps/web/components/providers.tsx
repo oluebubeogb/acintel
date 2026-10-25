@@ -8,7 +8,7 @@ export type Kpi = { incidents: Record<string, number>; agents: Record<string, nu
 type Counts = { targets: Record<string, number>; parents: Record<string, number>; total: number; kpi?: Kpi; at?: string };
 type Prefs = { site: Record<string, any>; admin: Record<string, any>; effective: Record<string, any> };
 type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string; undo?: string[]; onUndone?: () => void };
-export type ConfirmOpts = { title: string; body?: React.ReactNode; confirm?: string; danger?: boolean; input?: { label: string; placeholder?: string; required?: boolean } };
+export type ConfirmOpts = { title: string; body?: React.ReactNode; items?: string[]; confirm?: string; danger?: boolean; input?: { label: string; placeholder?: string; required?: boolean } };
 type Live = 'connecting' | 'live' | 'offline';
 
 type Ctx = {
@@ -37,6 +37,22 @@ export function useLive(keys: string[], fn: () => void) {
   }, [k]);
 }
 
+/** Max chars per excerpt line — anything longer is clipped with an ellipsis (also CSS-clamped to one line). */
+export const EXCERPT_MAX = 84;
+export const clip = (s: string, n = EXCERPT_MAX) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t; };
+
+/** Line-by-line list of affected records: first 5 visible, the rest behind "Show N more". */
+export function ExcerptList({ items, max = 5 }: { items: string[]; max?: number }) {
+  const [open, setOpen] = useState(false);
+  const shown = open ? items : items.slice(0, max);
+  return (
+    <div className="excerpts">
+      <ol className={open && items.length > 12 ? 'scroll' : ''}>{shown.map((t, i) => <li key={i} className="excerpt" title={t}><span className="ex-n">{i + 1}</span><span className="ex-t">{clip(t)}</span></li>)}</ol>
+      {items.length > max && <button type="button" className="ex-more" onClick={() => setOpen(!open)}>{open ? 'Show less' : `Show ${items.length - max} more`}</button>}
+    </div>
+  );
+}
+
 function ConfirmDialog({ o, onDone }: { o: ConfirmOpts; onDone: (v: false | { value: string }) => void }) {
   const [v, setV] = useState('');
   const ok = !o.input?.required || v.trim().length > 0;
@@ -47,6 +63,7 @@ function ConfirmDialog({ o, onDone }: { o: ConfirmOpts; onDone: (v: false | { va
         <div className="modal-head"><div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
           <span className={`confirm-ico ${o.danger ? 'danger' : ''}`}>{o.danger ? <AlertTriangle size={18} /> : <Info size={18} />}</span>
           <div><h2>{o.title}</h2>{o.body && <div className="hint" style={{ marginTop: 4 }}>{o.body}</div>}</div></div></div>
+        {o.items?.length ? <div className="modal-body" style={{ paddingTop: 0, paddingBottom: o.input ? 6 : undefined }}><ExcerptList items={o.items} /></div> : null}
         {o.input && <div className="modal-body" style={{ paddingTop: 0 }}><label className="label">{o.input.label}</label>
           <textarea autoFocus className="textarea" style={{ minHeight: 70 }} placeholder={o.input.placeholder} value={v} onChange={(e) => setV(e.target.value)} /></div>}
         <div className="modal-foot">

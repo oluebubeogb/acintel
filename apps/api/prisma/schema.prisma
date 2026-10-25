@@ -141,6 +141,7 @@ model Agent {
   lastSeenAt DateTime?
   createdAt  DateTime       @default(now())
   tasks      AgentTask[]
+  reports    Incident[]     @relation("AgentReports") // incidents this agent filed (source = agent)
 
   @@index([status])
   @@index([lga])
@@ -157,6 +158,8 @@ model AgentTask {
   incident    Incident  @relation(fields: [incidentId], references: [id], onDelete: Cascade)
   status      String    @default("assigned")
   assignedBy  String?
+  purpose     String? // "Send to Vigilante": verify | confirm | resolve (null = auto-assigned on dispatch)
+  note        String?
   createdAt   DateTime  @default(now())
   respondedAt DateTime?
   completedAt DateTime?
@@ -180,6 +183,14 @@ model Incident {
   status      String          @default("new") // new | dispatched | acted | resolved | fake
   reporterId  String?
   reporter    User?           @relation(fields: [reporterId], references: [id], onDelete: SetNull)
+  /// Where the report came from: user (app) | agent (field agent app) | call_centre | ecc
+  source      String          @default("user")
+  agentReporterId String?
+  agentReporter   Agent?      @relation("AgentReports", fields: [agentReporterId], references: [id], onDelete: SetNull)
+  /// Short AI headline + longer AI summary of `details` (the reporter's raw words). Null until generated.
+  aiTitle     String?
+  aiSummary   String?
+  aiAt        DateTime?
   createdAt   DateTime        @default(now())
   actedAt     DateTime?
   resolvedAt  DateTime?
@@ -191,6 +202,8 @@ model Incident {
 
   @@index([status])
   @@index([createdAt])
+  @@index([source])
+  @@index([agentReporterId])
 }
 
 model IncidentMedia {

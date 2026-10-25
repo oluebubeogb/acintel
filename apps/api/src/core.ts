@@ -4,6 +4,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 import { AdminCtx, CurrentAdmin, Public, can } from './auth';
+import { narrative } from './incident-text';
 import { opaqueId } from './util';
 import { Activity, Bus, Counts } from './realtime';
 import { LGAS, pointIn } from './geo';
@@ -143,9 +144,11 @@ export class ActivitySimulator implements OnModuleInit, OnModuleDestroy {
       const cats = await this.prisma.reportCategory.findMany({ where: { status: 'active' } });
       if (!cats.length) return;
       const cat = cats[Math.floor(Math.random() * cats.length)];
-      const reporter = await this.prisma.user.findFirst({ where: { status: 'active', lga }, skip: Math.floor(Math.random() * 5) });
+      const sr = Math.random(); const source = sr < 0.62 ? 'user' : sr < 0.84 ? 'agent' : sr < 0.94 ? 'call_centre' : 'ecc';
+      const reporter = source === 'user' ? await this.prisma.user.findFirst({ where: { status: 'active', lga }, skip: Math.floor(Math.random() * 5) }) : null;
+      const agentRep = source === 'agent' ? await this.prisma.agent.findFirst({ where: { status: 'active', lga }, skip: Math.floor(Math.random() * 3) }) : null;
       const [lat, lng] = pointIn(lga);
-      const i = await this.prisma.incident.create({ data: { publicId: opaqueId(), category: cat.name, categoryId: cat.id, details: `${cat.name} reported near ${lga} market`, location: `${lga}, Abia, Nigeria`, lga, lat, lng, reporterId: reporter?.id } });
+      const i = await this.prisma.incident.create({ data: { publicId: opaqueId(), category: cat.name, categoryId: cat.id, details: narrative(cat.name, lga), location: `${lga}, Abia, Nigeria`, lga, lat, lng, reporterId: reporter?.id, source: agentRep || source !== 'agent' ? source : 'user', agentReporterId: agentRep?.id } });
       await this.act.notify('reports.new', 'report', `New report — ${cat.name}`, lga, `/e/${i.publicId}`);
       this.act.changed(['reports']);
     } else {

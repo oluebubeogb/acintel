@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { ArrowUpRight, Download, RefreshCw } from 'lucide-react';
 import { api, downloadCsv, lagosStamp } from '@/lib/api';
 import { LGAS } from './forms';
@@ -9,32 +9,35 @@ import { DrillOverlay } from './overlays';
 import { KpiIcon } from './kpi-icons';
 
 type A = { from: string; to: string; totals: { incidents: number; byStatus: Record<string, number>; alarms: Record<string, number>; signups: number; onboarded: number; dispatched: number; avgResolveHours: number | null };
+  bySource: { key: string; name: string; count: number; open: number; resolved: number; fake: number }[];
   byCategory: { name: string; count: number }[]; byLga: { name: string; count: number }[]; byAgency: { name: string; count: number }[]; byDay: { day: string; label: string; total: number; resolved: number }[] };
 type Drill = { kind: string; title: string; query: Record<string, string> };
 type Kpi = { label: string; v: number | string; accent: string; icon: string; tip: string; drill?: Drill };
+const SRC: Record<string, { icon: string; accent: string; label: string }> = { user: { icon: 'user', accent: '#2563eb', label: 'From Users' }, agent: { icon: 'agent', accent: '#16a34a', label: 'From Agents' }, call_centre: { icon: 'headset', accent: '#ea580c', label: 'Call Centre' }, ecc: { icon: 'radio', accent: '#7c3aed', label: 'ECC' } };
 const back = (n: number) => { const d = new Date(Date.now() - n * 86400000); return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Lagos' }).format(d); };
 
 /** Analytics over any date range; CSV pack = one file with every section. */
 export function Analytics() {
   const sp = useSearchParams();
-  const [f, setF] = useState({ from: sp.get('from') || back(29), to: sp.get('to') || lagosStamp(), lga: sp.get('lga') || 'All', category: sp.get('category') || 'All' });
+  const [f, setF] = useState({ from: sp.get('from') || back(29), to: sp.get('to') || lagosStamp(), lga: sp.get('lga') || 'All', category: sp.get('category') || 'All', source: sp.get('source') || 'All' });
   const [cats, setCats] = useState<string[]>([]);
   const [a, setA] = useState<A | null>(null); const [err, setErr] = useState('');
   const [drill, setDrill] = useState<Drill | null>(null);
   useEffect(() => { api<{ name: string }[]>('/categories').then((c) => setCats(c.map((x) => x.name))).catch(() => undefined); }, []);
   const load = useCallback(() => {
-    setErr(''); const q = new URLSearchParams({ from: f.from, to: f.to }); if (f.lga !== 'All') q.set('lga', f.lga); if (f.category !== 'All') q.set('category', f.category);
+    setErr(''); const q = new URLSearchParams({ from: f.from, to: f.to }); if (f.lga !== 'All') q.set('lga', f.lga); if (f.category !== 'All') q.set('category', f.category); if (f.source !== 'All') q.set('source', f.source);
     api<A>(`/analytics?${q}`).then(setA).catch((e) => setErr(e.message));
   }, [f]);
   useEffect(() => { load(); }, [load]);
   const csv = () => {
     if (!a) return;
     const rows: Record<string, unknown>[] = [
-      { section: 'Range', name: `${a.from} → ${a.to}`, value: '' }, { section: 'Filter', name: `LGA ${f.lga} · Category ${f.category}`, value: '' },
+      { section: 'Range', name: `${a.from} → ${a.to}`, value: '' }, { section: 'Filter', name: `LGA ${f.lga} · Category ${f.category} · Source ${f.source}`, value: '' },
       { section: 'Totals', name: 'Incidents', value: a.totals.incidents }, ...Object.entries(a.totals.byStatus).map(([k, v]) => ({ section: 'Totals', name: `Incidents ${k}`, value: v })),
       ...Object.entries(a.totals.alarms).map(([k, v]) => ({ section: 'Totals', name: `${k} alarms`, value: v })),
       { section: 'Totals', name: 'User signups', value: a.totals.signups }, { section: 'Totals', name: 'Agents onboarded', value: a.totals.onboarded },
       { section: 'Totals', name: 'Dispatches', value: a.totals.dispatched }, { section: 'Totals', name: 'Avg hours to resolve', value: a.totals.avgResolveHours ?? '' },
+      ...(a.bySource || []).map((x) => ({ section: 'By source', name: x.name, value: x.count, resolved: x.resolved })),
       ...a.byCategory.map((x) => ({ section: 'By category', name: x.name, value: x.count })), ...a.byLga.map((x) => ({ section: 'By LGA', name: x.name, value: x.count })),
       ...a.byAgency.map((x) => ({ section: 'By agency', name: x.name, value: x.count })), ...a.byDay.map((x) => ({ section: 'By day', name: x.day, value: x.total, resolved: x.resolved })),
     ];
@@ -44,7 +47,7 @@ export function Analytics() {
   const T = a?.totals;
   // Same server filters the analytics endpoint used, so each drill lists exactly the records behind the number.
   const base: Record<string, string> = { from: f.from, to: f.to, ...(f.lga !== 'All' ? { lga: f.lga } : {}) };
-  const inc = (extra: Record<string, string> = {}) => ({ ...base, ...(f.category !== 'All' ? { category: f.category } : {}), ...extra });
+  const inc = (extra: Record<string, string> = {}) => ({ ...base, ...(f.category !== 'All' ? { category: f.category } : {}), ...(f.source !== 'All' ? { source: f.source } : {}), ...extra });
   const range = a ? `${a.from} → ${a.to}` : '';
   const kpis: Kpi[] = T ? [
     { label: 'Incidents', v: T.incidents, accent: '#2563eb', icon: 'doc', tip: `All reports filed ${range}`, drill: { kind: 'reports.all', title: 'Incidents', query: inc() } },
@@ -63,6 +66,7 @@ export function Analytics() {
         <label><span>To</span><input type="date" className="input" value={f.to} min={f.from} onChange={s('to')} /></label>
         <label><span>LGA</span><select className="select" value={f.lga} onChange={s('lga')}>{['All', ...LGAS].map((x) => <option key={x}>{x}</option>)}</select></label>
         <label><span>Category</span><select className="select" value={f.category} onChange={s('category')}>{['All', ...cats].map((x) => <option key={x}>{x}</option>)}</select></label>
+        <label><span>Source</span><select className="select" value={f.source} onChange={s('source')}><option value="All">All Sources</option>{Object.entries(SRC).map(([k, v]) => <option key={k} value={k}>{v.label.replace('From ', '')}</option>)}</select></label>
         {[7, 30, 90].map((n) => <button key={n} className="btn btn-sm" onClick={() => setF({ ...f, from: back(n - 1), to: lagosStamp() })}>{n}d</button>)}
         <div style={{ flex: 1 }} />
         <button className="btn btn-sm" onClick={load} data-tip="Re-run"><RefreshCw size={13} /></button>
@@ -80,6 +84,21 @@ export function Analytics() {
             <ArrowUpRight size={15} className="k-go" />
           </button>
         ))}
+      </div>
+      <div className="sec-head"><h3>By Source</h3><p>Where reports came from · click a card for the list</p></div>
+      <div className="src-cards" style={{ marginBottom: 16 }}>
+        {(a?.bySource || Object.keys(SRC).map((k) => ({ key: k, name: '', count: 0, open: 0, resolved: 0, fake: 0 }))).map((x) => {
+          const st = SRC[x.key]; const tot = a?.bySource?.reduce((n, y) => n + y.count, 0) || 0; const pct = tot ? Math.round((x.count / tot) * 100) : 0;
+          return (
+            <button key={x.key} className={`card src-card ${f.source === x.key ? 'on' : ''}`} style={{ ['--acc' as any]: st.accent }} disabled={!a} onClick={() => setDrill({ kind: 'reports.all', title: `${st.label} reports`, query: inc({ source: x.key }) })} data-tip={`${st.label}: ${x.open} open · ${x.resolved} resolved · ${x.fake} fake`}>
+              <KpiIcon name={st.icon} accent={st.accent} />
+              <div className="src-body"><small>{st.label}</small><b>{a ? x.count.toLocaleString('en-NG') : '—'}<em>{a ? `${pct}%` : ''}</em></b>
+                <span className="src-sub">{x.open} open · {x.resolved} resolved · {x.fake} fake</span>
+                <span className="src-bar"><i style={{ width: `${pct}%` }} /></span></div>
+              <ArrowUpRight size={15} className="k-go" />
+            </button>
+          );
+        })}
       </div>
       <div className="grid charts" style={{ marginBottom: 16 }}>
         <div className="card"><div className="card-head"><div><h3>Reports per Day</h3><p>{a ? `${a.from} → ${a.to} (Africa/Lagos)` : '…'}</p></div></div>
@@ -100,6 +119,13 @@ export function Analytics() {
             <CartesianGrid vertical={false} stroke="#edf0f5" /><XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: '#6a7a90' }} interval={0} angle={-25} textAnchor="end" height={60} />
             <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6a7a90' }} /><Tooltip />
             <Bar dataKey="count" name="Reports" fill="#0d9488" radius={[6, 6, 0, 0]} maxBarSize={30} /></BarChart></ResponsiveContainer>}</div></div>
+        <div className="card"><div className="card-head"><div><h3>Outcome by Source</h3><p>Open, resolved and fake per report source</p></div></div>
+          <div className="chart-box" style={{ height: 260 }}>{a && <ResponsiveContainer><BarChart data={(a.bySource || []).map((x) => ({ ...x, name: SRC[x.key]?.label.replace('From ', '') || x.name }))} margin={{ top: 16, right: 12, left: -16, bottom: 0 }}>
+            <CartesianGrid vertical={false} stroke="#edf0f5" /><XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6a7a90' }} />
+            <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6a7a90' }} /><Tooltip /><Legend iconType="circle" wrapperStyle={{ fontSize: 12 }} />
+            <Bar dataKey="open" name="Open" stackId="s" fill="#2563eb" maxBarSize={38} /><Bar dataKey="resolved" name="Resolved" stackId="s" fill="#10b981" maxBarSize={38} /><Bar dataKey="fake" name="Fake" stackId="s" fill="#e11d48" radius={[6, 6, 0, 0]} maxBarSize={38} /></BarChart></ResponsiveContainer>}</div></div>
+      </div>
+      <div className="grid charts" style={{ marginBottom: 16 }}>
         <div className="card"><div className="card-head"><div><h3>Dispatches by Agency</h3><p>In range</p></div></div>
           <div style={{ padding: '6px 20px 18px', display: 'grid', gap: 8 }}>
             {a && !a.byAgency.length && <div className="hint">No dispatches in this range.</div>}

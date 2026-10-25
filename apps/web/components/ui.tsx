@@ -8,11 +8,11 @@ import { useApp } from './providers';
 export type Col = { key: string; label: string };
 export type Row = Record<string, any> & { _id?: string; _links?: Record<string, string>; _ts?: string };
 
-export function Modal({ title, subtitle, onClose, children, footer, size }: { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; size?: 'sm' }) {
+export function Modal({ title, subtitle, onClose, children, footer, size }: { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; size?: 'sm' | 'xl' }) {
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal ${size === 'sm' ? 'modal-sm' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
+      <div className={`modal ${size === 'sm' ? 'modal-sm' : size === 'xl' ? 'modal-xl' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head"><div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div><button className="icon-btn" onClick={onClose} data-tip="Close (Esc)" data-tip-pos="left" aria-label="Close"><X size={18} /></button></div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
@@ -32,6 +32,15 @@ export function Cell({ col, row, linkKey }: { col: Col; row: Row; linkKey?: stri
   if (CHIP_KEYS.has(col.key) && typeof v === 'string' && v) return <span className={`chip ${STATUS_TONE[v] || ''}`}>{v.replace(/_/g, ' ')}</span>;
   if (col.key === linkKey && row._id) return <Link href={`/e/${row._id}`} data-tip="Open record">{String(v ?? '')}</Link>;
   const href = row._links?.[col.key];
+  // Reporter column: name + a small Agent / User / Call Centre / ECC tag underneath.
+  if (col.key === 'reporter' && row._reporterRole) return (
+    <span className="who">{href && v ? <Link className="cell-link" href={href} data-tip="Open">{String(v)}</Link> : <span>{String(v || '—')}</span>}
+      <span className={`role-tag rt-${row._source || 'user'}`}>{row._reporterRole}</span></span>
+  );
+  // Admin Actions: show the admin's name, email as tooltip + secondary line.
+  if (col.key === 'actor' && row._actorEmail && row._actorEmail !== v) return <span className="who" data-tip={row._actorEmail}><span>{String(v)}</span><small className="who-sub">{row._actorEmail}</small></span>;
+  // Report headline (AI or local) — one line, full report text on hover.
+  if (col.key === 'title' && v) return <span className="cell-title" title={row.details || String(v)}>{String(v)}</span>;
   if (href && v) return <Link className="cell-link" href={href} data-tip="Open">{String(v)}</Link>;
   if (DATE_KEYS.has(col.key) && row._ts && v) return <button className="date-link" onClick={(e) => { e.stopPropagation(); openDay(dayOf(row._ts!), row._id); }} data-tip="See everything that happened this day">{String(v)}</button>;
   return <>{v === '' || v == null ? <span style={{ color: 'var(--faint)' }}>—</span> : String(v)}</>;
@@ -100,7 +109,7 @@ export function DataTable({ columns, rows, loading, exportName, linkKey, actions
   columns: Col[]; rows: Row[]; loading?: boolean; exportName: string; linkKey?: string; total?: number;
   actions?: (row: Row) => React.ReactNode; importKind?: string; onImported?: () => void; toolbar?: React.ReactNode;
   /** Bulk actions for marked rows. Return buttons; call clear() after a successful action. */
-  bulk?: (ids: string[], clear: () => void) => React.ReactNode;
+  bulk?: (ids: string[], clear: () => void, rows: Row[]) => React.ReactNode;
   /** Inner scroll with a max height — only for pages/overlays that stack several tables. Single-table pages paginate instead. */
   scroll?: boolean;
 }) {
@@ -154,7 +163,7 @@ export function DataTable({ columns, rows, loading, exportName, linkKey, actions
       </div>
       {bulk && marked.size > 0 && (
         <div className="bulkbar"><b style={{ fontSize: 13 }}>{marked.size} selected</b>
-          {bulk(filtered.filter((r, i) => marked.has(rowId(r, i)) && r._id).map((r) => r._id!), () => setMarked(new Set()))}
+          {(() => { const sel = filtered.filter((r, i) => marked.has(rowId(r, i)) && r._id); return bulk(sel.map((r) => r._id!), () => setMarked(new Set()), sel); })()}
           <button className="btn btn-sm" onClick={() => setMarked(new Set())}>Clear</button></div>
       )}
       <div className={`table-wrap ${scroll ? 'scroll' : ''}`}>
@@ -174,7 +183,7 @@ export function DataTable({ columns, rows, loading, exportName, linkKey, actions
             {!loading && view.map((r, i) => {
               const id = rowId(r, page * size + i);
               return (
-                <tr key={id} className={marked.has(id) ? 'marked' : ''}>
+                <tr key={`${id}:${page * size + i}`} className={marked.has(id) ? 'marked' : ''}>
                   <td className="chk"><label style={{ display: 'flex', gap: 6, alignItems: 'center', cursor: 'pointer', color: 'var(--faint)', fontSize: 12 }}><input type="checkbox" checked={marked.has(id)} onChange={() => toggleMark(id)} />{page * size + i + 1}</label></td>
                   {columns.map((c) => <td key={c.key} className={c.key === linkKey ? 'primary' : ''}><Cell col={c} row={r} linkKey={linkKey} /></td>)}
                   {actions && <td>{actions(r)}</td>}

@@ -4,6 +4,7 @@ import { PrismaService } from './prisma.service';
 import { AuthController, RateLimiter, SessionGuard } from './auth';
 import { ActivitySimulator, HealthController, NotificationsController, PrefsController } from './core';
 import { RecordsController } from './records';
+import { IncidentAiWorker } from './incident-text';
 import { SearchController } from './search';
 import { AiController } from './ai';
 import { Activity, Bus, Counts, StreamController } from './realtime';
@@ -18,6 +19,6 @@ import {
     UsersOpsController, AgentsOpsController, GroupsController, CategoriesController, AdminsController, IncidentsController, MediaController,
     AlarmsController, SecurityAlertsController, AuditController, ImportController,
   ],
-  providers: [PrismaService, Bus, Counts, Activity, RateLimiter, ActivitySimulator, { provide: APP_GUARD, useClass: SessionGuard }],
+  providers: [PrismaService, Bus, Counts, Activity, RateLimiter, ActivitySimulator, IncidentAiWorker, { provide: APP_GUARD, useClass: SessionGuard }],
 })
 export class AppModule {}

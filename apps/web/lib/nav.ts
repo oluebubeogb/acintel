@@ -35,10 +35,21 @@ export const NAV: NavParent[] = [
   ] },
 ];
 
+/** Reachable via KPI / analytics drill-down only — not shown in the nav pane. */
+export const DRILL_ONLY: NavChild[] = [
+  c('reports', 'users', 'From users', 'Reports from users'),
+  c('reports', 'agents', 'From agents', 'Reports from agents'),
+  c('reports', 'call-centre', 'Call centre', 'Call centre reports'),
+  c('reports', 'ecc', 'ECC', 'ECC reports'),
+];
+
 export function findChild(section: string, child: string) {
   const p = NAV.find((n) => n.key === section);
-  const ch = p?.children.find((x) => x.key === `${section}.${child}`);
-  return p && ch ? { parent: p, child: ch } : null;
+  const ch = p?.children.find((x) => x.key === `${section}.${child}`)
+    || DRILL_ONLY.find((x) => x.key === `${section}.${child}`);
+  if (!ch) return null;
+  const parent = p || NAV.find((n) => n.key === section) || { key: section, short: tc(section), full: tc(section), icon: 'file', tone: 'amber' as const, children: [] };
+  return { parent, child: ch };
 }
 export function parentForPath(path: string) {
   if (path.startsWith('/alerts')) return 'alerts';

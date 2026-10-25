@@ -6,6 +6,7 @@ import * as bcrypt from 'bcryptjs';
 import { opaqueId } from './util';
 import { assignAgents } from './tasks';
 import { LGAS, normLga, pointIn } from './geo';
+import { narrative } from './incident-text';
 
 const prisma = new PrismaClient();
 let s = 20261025;
@@ -68,6 +69,19 @@ async function ensureBackfill() {
   for (const a of noTag) {
     await prisma.agent.update({ where: { id: a.id }, data: { ...(a.tag ? {} : { tag: `ABHS/AGT/${n++}` }), ...(a.email ? {} : { email: `${a.name.toLowerCase().replace(/[^a-z]+/g, '.')}.${a.publicId.slice(0, 4).toLowerCase()}@homeland.abia.gov.ng` }) } });
   }
+  // UI polish 2: demo incidents get realistic reporter text and a mix of sources (user / agent / call centre / ECC).
+  // Only rows still carrying the old placeholder text ("X reported around/near Y") are touched, so real data is never rewritten.
+  const plain = await prisma.incident.findMany({ where: { OR: [{ details: { contains: ' reported around ' } }, { details: { contains: ' reported near ' } }] } });
+  if (plain.length) {
+    const byLga = new Map<string, string[]>();
+    for (const a of await prisma.agent.findMany({ where: { status: 'active' }, select: { id: true, lga: true } })) byLga.set(a.lga, [...(byLga.get(a.lga) || []), a.id]);
+    for (const i of plain) {
+      const r = rnd(); const pool = byLga.get(i.lga) || [];
+      const source = r < 0.6 ? 'user' : r < 0.82 && pool.length ? 'agent' : r < 0.93 ? 'call_centre' : 'ecc';
+      await prisma.incident.update({ where: { id: i.id }, data: { details: narrative(i.category, i.lga, rnd), ...(i.source === 'user' ? { source, ...(source === 'agent' ? { agentReporterId: pick(pool), reporterId: null } : source === 'user' ? {} : { reporterId: null }) } : {}) } });
+    }
+    console.log(`Seed: rewrote ${plain.length} demo incident narratives + sources.`);
+  }
   if (!(await prisma.agentTask.count())) {
     const incs = await prisma.incident.findMany({ where: { status: { in: ['dispatched', 'acted', 'resolved'] } } });
     for (const i of incs) {
@@ -103,12 +117,13 @@ async function demo(email: string, passwordHash: string) {
   }
   await prisma.agent.createMany({ data: agents });
   const allUsers = await prisma.user.findMany({ select: { id: true, name: true, phone: true, lga: true } });
+  const allAgents = await prisma.agent.findMany({ where: { status: 'active' }, select: { id: true, lga: true } });
   const incidents = [];
   for (let i = 0; i < 150; i++) {
     const cat = pick(cats); const lga = pick(LGAS); const r = rnd(); const created = ago(14); const [lat, lng] = pointIn(lga, rnd);
     const status = r < 0.12 ? 'new' : r < 0.32 ? 'dispatched' : r < 0.55 ? 'acted' : r < 0.95 ? 'resolved' : 'fake';
-    incidents.push({ publicId: opaqueId(), category: cat.name, categoryId: cat.id, details: `${cat.name} reported around ${lga}`, location: `${lga}, Abia, Nigeria`, lga, lat, lng, status,
-      reporterId: rnd() < 0.85 ? pick(allUsers).id : null, createdAt: created,
+    incidents.push({ publicId: opaqueId(), category: cat.name, categoryId: cat.id, details: narrative(cat.name, lga, rnd), location: `${lga}, Abia, Nigeria`, lga, lat, lng, status,
+      ...((sr) => sr < 0.6 ? { source: 'user', reporterId: rnd() < 0.9 ? pick(allUsers).id : null } : sr < 0.82 ? { source: 'agent', agentReporterId: pick(allAgents.filter((a) => a.lga === lga).concat(allAgents)).id } : { source: sr < 0.93 ? 'call_centre' : 'ecc' })(rnd()), createdAt: created,
       actedAt: ['acted', 'resolved'].includes(status) ? new Date(created.getTime() + rnd() * 6 * 3600000) : null,
       resolvedAt: ['resolved', 'fake'].includes(status) ? new Date(created.getTime() + (6 + rnd() * 40) * 3600000) : null, resolvedBy: ['resolved', 'fake'].includes(status) ? email : null,
       note: status === 'fake' ? 'Prank report — caller unreachable' : null });
