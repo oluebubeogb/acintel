@@ -22,7 +22,6 @@ export const NAV: NavParent[] = [
     c('reports', 'categories', 'Categories', 'Report categories'), c('reports', 'map', 'Active map', 'Active incident map'),
     c('reports', 'new', 'New', 'New reports'), c('reports', 'dispatched', 'Dispatched', 'Dispatched reports'),
     c('reports', 'acted', 'Acted upon', 'Acted upon reports'), c('reports', 'resolved', 'Resolved', 'Resolved security reports'),
-    c('reports', 'analytics', 'Analytics', 'Generate analytics'),
   ] },
   { key: 'alarms', short: 'Alarms', full: 'Alarms', icon: 'siren', tone: 'rose', children: [
     c('alarms', 'new', 'New', 'New alarms'), c('alarms', 'duress', 'Duress', 'Duress alarms'), c('alarms', 'panic', 'Panic', 'Panic alarms'),
@@ -41,6 +40,8 @@ export const DRILL_ONLY: NavChild[] = [
   c('reports', 'agents', 'From agents', 'Reports from agents'),
   c('reports', 'call-centre', 'Call centre', 'Call centre reports'),
   c('reports', 'ecc', 'ECC', 'ECC reports'),
+  // Analytics lives under the Dashboard button in the sidebar (not duplicated in the Reports pane).
+  c('reports', 'analytics', 'Analytics', 'Generate analytics'),
 ];
 
 export function findChild(section: string, child: string) {

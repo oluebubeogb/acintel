@@ -9,7 +9,10 @@ export type BusEvent =
   | { type: 'notification'; target: string; kind: string; title: string; href?: string | null }
   | { type: 'changed'; keys: string[]; id?: string }
   | { type: 'counts'; data?: unknown }
-  | { type: 'ai.done'; adminId: string; sessionId: string; messageId: string };
+  | { type: 'ai.done'; adminId: string; sessionId: string; messageId: string }
+  | { type: 'ai.title'; adminId: string; sessionId: string; title: string }
+  | { type: 'chat.message'; threadId: string; messageId: string; sender: string }
+  | { type: 'chat.read'; threadId: string; sender: string };
 
 const CHANNEL = 'acintel:events';
 
@@ -72,7 +75,7 @@ export class Counts {
   }
   private async compute() {
     const onlineSince = new Date(Date.now() - Number(process.env.AGENT_ONLINE_MINUTES || 15) * 60000);
-    const [groups, inc, ag, us, al, unassigned, online] = await Promise.all([
+    const [groups, inc, ag, us, al, unassigned, online, chats] = await Promise.all([
       this.prisma.notification.groupBy({ by: ['target'], where: { readAt: null }, _count: true }),
       this.prisma.incident.groupBy({ by: ['status'], _count: true }),
       this.prisma.agent.groupBy({ by: ['status'], _count: true }),
@@ -80,13 +83,14 @@ export class Counts {
       this.prisma.alarm.groupBy({ by: ['type'], where: { status: 'new' }, _count: true }),
       this.prisma.agent.count({ where: { groupId: null } }),
       this.prisma.agent.count({ where: { status: 'active', lastSeenAt: { gte: onlineSince } } }),
+      this.prisma.chatMessage.count({ where: { sender: 'agent', readAt: null } }), // unread agent → control-room messages
     ]);
     const targets: Record<string, number> = {}; const parents: Record<string, number> = {}; let total = 0;
     for (const g of groups) { targets[g.target] = g._count; const p = g.target.split('.')[0]; parents[p] = (parents[p] || 0) + g._count; total += g._count; }
     parents.alerts = total; targets['alerts.feed'] = total; // Alerts feed carries every new-in
     const m = (rows: any[], key: string) => Object.fromEntries(rows.map((r) => [r[key], r._count]));
     const kpi = { incidents: m(inc, 'status'), agents: { ...m(ag, 'status'), unassigned, online }, users: m(us, 'status'), alarmsNew: m(al, 'type') };
-    return { targets, parents, total, kpi, at: new Date().toISOString() };
+    return { targets, parents, total, kpi, chats, at: new Date().toISOString() };
   }
 }
 
@@ -146,7 +150,7 @@ export class StreamController {
     this.counts.get().then((c) => !res.writableEnded && res.write(`event: counts\ndata: ${JSON.stringify({ type: 'counts', data: c })}\n\n`)).catch(() => undefined);
     const me = req.admin?.id;
     const off = this.bus.on((e) => {
-      if (e.type === 'ai.done' && e.adminId !== me) return;
+      if ((e.type === 'ai.done' || e.type === 'ai.title') && e.adminId !== me) return;
       res.write(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`);
     });
     const ping = setInterval(() => res.write(`: ping ${Date.now()}\n\n`), 20000);

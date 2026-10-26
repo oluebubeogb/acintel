@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Fragment, useEffect, useRef, useState } from 'react';
-import { Bell, BarChart3, LayoutDashboard, LogOut, Menu, ScrollText, Settings, ShieldHalf, UserRound } from 'lucide-react';
+import { Bell, BarChart3, LayoutDashboard, LogOut, Menu, MessagesSquare, ScrollText, Settings, ShieldHalf, UserRound } from 'lucide-react';
 import { DayOverlay } from './overlays';
 import { NAV, parentForPath } from '@/lib/nav';
 import { api } from '@/lib/api';
@@ -15,7 +15,7 @@ function LagosClock() {
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => { setNow(new Date()); const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
   if (!now) return <div className="clock" style={{ width: 150 }} />;
-  const time = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lagos', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(now);
+  const time = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lagos', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h12' }).format(now);
   const date = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lagos', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(now);
   return <div className="clock" data-tip="Africa/Lagos (WAT, UTC+1)" data-tip-pos="bottom"><b>{time}</b><small>{date}</small></div>;
 }
@@ -110,7 +110,6 @@ function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }
         <Link href="/" className={`side-link ${path === '/' ? 'current' : ''}`} onClick={onNavigate}><LayoutDashboard size={16} /> Dashboard</Link>
         <Link href="/reports/analytics" className={`side-link ${path === '/reports/analytics' ? 'current' : ''}`} onClick={onNavigate}><BarChart3 size={16} /> Analytics</Link>
         {can('audit.view') && <Link href="/audit" className={`side-link ${path === '/audit' ? 'current' : ''}`} onClick={onNavigate}><ScrollText size={16} /> Audit Log</Link>}
-        <Link href="/settings" className={`side-link ${path === '/settings' ? 'current' : ''}`} onClick={onNavigate}><Settings size={16} /> Settings</Link>
       </div>
     </aside>
   );
@@ -118,7 +117,7 @@ function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { counts, day, closeDay } = useApp();
+  const { counts, day, closeDay, can } = useApp();
   const path = usePathname();
   useEffect(() => setMobileOpen(false), [path]);
   useEffect(() => closeDay(), [path]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -135,6 +134,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <div className="top-spacer" />
         <LagosClock />
         <div className="top-actions">
+          {can('ops') && (
+            <Link href="/chats" className={`icon-btn bell ${path.startsWith('/chats') ? 'is-on' : ''}`} data-tip={counts.chats ? `Chats · ${counts.chats} unread` : 'Chats'} data-tip-pos="bottom" aria-label={`Chats${counts.chats ? `, ${counts.chats} unread` : ''}`}>
+              <MessagesSquare size={19} />
+              {(counts.chats || 0) > 0 && <CountBadge n={counts.chats} />}
+            </Link>
+          )}
           <Link href="/alerts" className="icon-btn bell" data-tip="Alerts & Notifications" data-tip-pos="bottom" aria-label="Alerts">
             <Bell size={19} />
             {counts.total > 0 && <CountBadge n={counts.total} />}

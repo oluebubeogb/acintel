@@ -5,7 +5,7 @@ import { api } from '@/lib/api';
 
 type Me = { email: string; name: string; role: string; publicId: string; perms: string[] };
 export type Kpi = { incidents: Record<string, number>; agents: Record<string, number>; users: Record<string, number>; alarmsNew: Record<string, number> };
-type Counts = { targets: Record<string, number>; parents: Record<string, number>; total: number; kpi?: Kpi; at?: string };
+type Counts = { targets: Record<string, number>; parents: Record<string, number>; total: number; kpi?: Kpi; chats?: number; at?: string };
 type Prefs = { site: Record<string, any>; admin: Record<string, any>; effective: Record<string, any> };
 type Toast = { id: number; kind: 'success' | 'error' | 'info'; text: string; undo?: string[]; onUndone?: () => void };
 export type ConfirmOpts = { title: string; body?: React.ReactNode; items?: string[]; confirm?: string; danger?: boolean; input?: { label: string; placeholder?: string; required?: boolean } };
@@ -93,10 +93,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [dismiss]);
   // Live counters: one cheap /counts payload (badges + KPI numbers). Pushed refreshes (SSE) are debounced so a
   // burst of events costs one request; failures back off exponentially (see poll loop below).
-  const fails = useRef(0); const inflight = useRef(false); const deb = useRef<any>(null);
+  const countsReady = useRef(false); const fails = useRef(0); const inflight = useRef(false); const deb = useRef<any>(null);
   const fetchCounts = useCallback(async () => {
     if (inflight.current) return; inflight.current = true;
-    try { setCounts(await api<Counts>('/counts')); fails.current = 0; } catch { fails.current = Math.min(fails.current + 1, 6); } finally { inflight.current = false; }
+    try { const c = await api<Counts>('/counts'); countsReady.current = true; setCounts(c); fails.current = 0; } catch { fails.current = Math.min(fails.current + 1, 6); } finally { inflight.current = false; }
   }, []);
   const refreshCounts = useCallback(() => { clearTimeout(deb.current); deb.current = setTimeout(fetchCounts, 350); }, [fetchCounts]);
   const markRead = useCallback((target: string) => {
@@ -132,10 +132,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       es = new EventSource('/api/stream');
       es.addEventListener('hello', () => setLive('live')); // server follows hello with a counts snapshot
       // Push-on-write: the API publishes the full counts payload after every write — apply it, no request needed.
-      es.addEventListener('counts', (e) => { try { const d = JSON.parse((e as MessageEvent).data); if (d?.data?.targets) { setCounts(d.data); fails.current = 0; } else refreshCounts(); } catch { refreshCounts(); } });
+      es.addEventListener('counts', (e) => { try { const d = JSON.parse((e as MessageEvent).data); if (d?.data?.targets) { countsReady.current = true; setCounts(d.data); fails.current = 0; } else refreshCounts(); } catch { refreshCounts(); } });
       es.addEventListener('changed', (e) => { let keys: string[] = []; try { keys = JSON.parse((e as MessageEvent).data).keys || []; } catch { /* */ }
         window.dispatchEvent(new CustomEvent('acintel:changed', { detail: { keys } })); });
       es.addEventListener('ai.done', (e) => window.dispatchEvent(new CustomEvent('acintel:ai', { detail: JSON.parse((e as MessageEvent).data) })));
+      for (const t of ['chat.message', 'chat.read']) es.addEventListener(t, (e) => window.dispatchEvent(new CustomEvent('acintel:chat', { detail: { event: t, ...JSON.parse((e as MessageEvent).data) } })));
+      es.addEventListener('ai.title', (e) => window.dispatchEvent(new CustomEvent('acintel:ai-title', { detail: JSON.parse((e as MessageEvent).data) })));
       es.onerror = () => { setLive('offline'); if (es?.readyState === EventSource.CLOSED) { es.close(); es = null; clearTimeout(retry); retry = setTimeout(connect, 10000); } };
     };
     const close = () => { es?.close(); es = null; setLive('offline'); };
@@ -164,15 +166,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => { dead = true; clearTimeout(t); };
   }, [pollSeconds, fetchCounts, live]);
 
-  // Soft chime for new alarms: fires when the unread 'alarms.new' count rises (pref: notifySound).
-  const soundOn = !!prefs?.effective.notifySound;
+  // Soft chime for new alarms: fires only when Settings → Sound On Alarm is ON (strict true), only after prefs AND a real
+  // counts payload have loaded (no chime on page load), and only when the unread 'alarms.new' count actually rises.
+  const soundOn = prefs?.effective.notifySound === true;
+  useEffect(() => { setChimeEnabled(prefs ? soundOn : false); }, [prefs, soundOn]);
+  // Other tabs / admins saving Settings → refetch prefs at once so a switched-off sound is honoured everywhere.
+  useEffect(() => {
+    const h = (e: Event) => { if (((e as CustomEvent).detail?.keys || []).includes('prefs')) api<Prefs>('/prefs').then(setPrefs).catch(() => undefined); };
+    window.addEventListener('acintel:changed', h); return () => window.removeEventListener('acintel:changed', h);
+  }, []);
   const lastAlarms = useRef<number | null>(null);
   useEffect(() => { unlockChime(); }, []);
   useEffect(() => {
+    if (!prefs || !countsReady.current) return; // prefs or the first real counts payload not loaded yet
     const n = counts.targets['alarms.new'] || 0;
     if (lastAlarms.current !== null && n > lastAlarms.current && soundOn) playChime();
     lastAlarms.current = n;
-  }, [counts.targets, soundOn]);
+  }, [counts, prefs, soundOn]);
 
   const can = useCallback((perm: string) => !!me && (me.perms?.includes('*') || me.perms?.includes(perm)), [me]);
   const pageSize = Number(prefs?.effective.pageSize) || 500;
@@ -193,12 +203,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-/* ---------- Web Audio chime ---------- */
+/* ---------- Web Audio chime ----------
+ * Gate: every chime goes through `chimeEnabled`, which is false until prefs load and mirrors Settings → Sound On Alarm.
+ * Tone: one warm sine (E5) + a quiet octave partial through a low-pass, peak gain 0.06, linear 30ms attack from true
+ * silence and an exponential tail that ends at ~-80dB before the oscillator stops — no clipping, no click on stop. */
 let audioCtx: AudioContext | null = null;
 let lastChime = 0;
+let chimeEnabled = false;
+export function setChimeEnabled(on: boolean) { chimeEnabled = on; }
 function ctx() {
   if (typeof window === 'undefined') return null;
-  if (!audioCtx) { const AC = window.AudioContext || (window as any).webkitAudioContext; if (!AC) return null; audioCtx = new AC(); }
+  if (!audioCtx) { const AC = window.AudioContext || (window as any).webkitAudioContext; if (!AC) return null; audioCtx = new AC({ latencyHint: 'playback' }); }
   return audioCtx;
 }
 /** Browsers start audio suspended until a user gesture — resume on the first click/key so later chimes can play. */
@@ -206,25 +221,31 @@ function unlockChime() {
   const go = () => { ctx()?.resume().catch(() => undefined); window.removeEventListener('pointerdown', go); window.removeEventListener('keydown', go); };
   window.addEventListener('pointerdown', go); window.addEventListener('keydown', go);
 }
-/** Two soft sine partials (A5 + E6) with a gentle attack and exponential decay; peak gain ≤ 0.12 through a compressor so it never clips. */
-export function playChime() {
+/** Plays the alarm chime if sound is on. `preview` (Settings switch being turned on) bypasses the gate once. */
+export async function playChime(opts: { preview?: boolean } = {}) {
+  if (!opts.preview && !chimeEnabled) return;
   const ac = ctx(); if (!ac) return;
-  const now = performance.now(); if (now - lastChime < 1500) return; lastChime = now;
-  if (ac.state === 'suspended') ac.resume().catch(() => undefined);
-  const t = ac.currentTime + 0.02;
-  const comp = ac.createDynamicsCompressor();
-  comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 6; comp.attack.value = 0.003; comp.release.value = 0.25;
-  const master = ac.createGain(); master.gain.value = 0.9;
-  comp.connect(master); master.connect(ac.destination);
-  ([[880, 0.12, 0], [1320, 0.07, 0.11]] as const).forEach(([f, peak, d]) => {
+  const now = performance.now(); if (now - lastChime < 2000) return; lastChime = now;
+  try { if (ac.state !== 'running') await ac.resume(); } catch { return; }
+  if (ac.state !== 'running') return; // still locked (no user gesture yet) — stay silent rather than glitch later
+  const t = ac.currentTime + 0.06; // schedule slightly ahead so the first samples are never dropped
+  const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2600; lp.Q.value = 0.5;
+  const out = ac.createGain(); out.gain.value = 1;
+  lp.connect(out); out.connect(ac.destination);
+  const voices: [number, number, number][] = [[659.25, 0.06, 0], [1318.5, 0.012, 0], [987.77, 0.035, 0.16]];
+  let end = t;
+  for (const [f, peak, d] of voices) {
     const o = ac.createOscillator(); const g = ac.createGain();
-    o.type = 'sine'; o.frequency.setValueAtTime(f, t + d);
-    g.gain.setValueAtTime(0.0001, t + d);
-    g.gain.exponentialRampToValueAtTime(peak, t + d + 0.025);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.9);
-    o.connect(g); g.connect(comp); o.start(t + d); o.stop(t + d + 0.95);
-  });
-  setTimeout(() => { try { master.disconnect(); } catch { /* */ } }, 1400);
+    const s = t + d, len = 1.1;
+    o.type = 'sine'; o.frequency.setValueAtTime(f, s);
+    g.gain.setValueAtTime(0, s);
+    g.gain.linearRampToValueAtTime(peak, s + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, s + len);
+    g.gain.linearRampToValueAtTime(0, s + len + 0.05);
+    o.connect(g); g.connect(lp); o.start(s); o.stop(s + len + 0.1);
+    end = Math.max(end, s + len + 0.1);
+  }
+  setTimeout(() => { try { out.disconnect(); lp.disconnect(); } catch { /* */ } }, (end - ac.currentTime + 0.3) * 1000);
 }
 
 /** Badge that pops when its number goes up. */

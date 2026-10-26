@@ -1,11 +1,16 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDownUp, ChevronLeft, ChevronRight, Download, Filter, Inbox, Search, Upload, X } from 'lucide-react';
+import { ArrowDownUp, ChevronLeft, ChevronRight, Download, EyeOff, Filter, Inbox, Info, Search, Upload, X } from 'lucide-react';
 import { api, downloadCsv } from '@/lib/api';
 import { useApp } from './providers';
 
 export type Col = { key: string; label: string };
+
+/** Small ⓘ that carries longer helper copy in a wrapping tooltip (keeps forms/settings clean). */
+export function InfoTip({ text, pos }: { text: string; pos?: 'bottom' | 'left' | 'right' }) {
+  return <span className="info-tip" data-tip={text} data-tip-wide="" data-tip-pos={pos} tabIndex={0} aria-label={text} role="img"><Info size={13} /></span>;
+}
 export type Row = Record<string, any> & { _id?: string; _links?: Record<string, string>; _ts?: string };
 
 export function Modal({ title, subtitle, onClose, children, footer, size }: { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; size?: 'sm' | 'xl' }) {
@@ -21,7 +26,7 @@ export function Modal({ title, subtitle, onClose, children, footer, size }: { ti
   );
 }
 
-const STATUS_TONE: Record<string, string> = { active: 'green', resolved: 'green', new: 'blue', pending: 'amber', dispatched: 'violet', acted: 'teal', suspended: 'rose', panic: 'rose', duress: 'amber', fake: '', inactive: '', online: 'green', offline: '', critical: 'rose', high: 'amber', medium: 'blue', low: 'green', superadmin: 'violet', controller: 'blue', group_admin: 'teal' };
+const STATUS_TONE: Record<string, string> = { active: 'green', resolved: 'green', new: 'blue', pending: 'amber', dispatched: 'violet', acted: 'teal', suspended: 'rose', panic: 'rose', duress: 'amber', fake: '', inactive: '', online: 'green', offline: '', critical: 'rose', high: 'amber', medium: 'blue', low: 'green', superadmin: 'violet', controller: 'blue', group_admin: 'teal', success: 'green', failed: 'rose' };
 const CHIP_KEYS = new Set(['status', 'type', 'online', 'riskLevel', 'role']);
 const DATE_KEYS = new Set(['regDate', 'date']);
 const dayOf = (ts: string | Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Lagos', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ts));
@@ -34,7 +39,7 @@ export function Cell({ col, row, linkKey }: { col: Col; row: Row; linkKey?: stri
   const href = row._links?.[col.key];
   // Reporter column: name + a small Agent / User / Call Centre / ECC tag underneath.
   if (col.key === 'reporter' && row._reporterRole) return (
-    <span className="who">{href && v ? <Link className="cell-link" href={href} data-tip="Open">{String(v)}</Link> : <span>{String(v || '—')}</span>}
+    <span className="who">{row._anon ? <span className="anon" data-tip="Reporter chose to stay anonymous"><EyeOff size={12} />Anonymous</span> : href && v ? <Link className="cell-link" href={href} data-tip="Open">{String(v)}</Link> : <span data-tip={[row._reporterPhone, row._reporterEmail].filter(Boolean).join(' · ') || undefined}>{String(v || '—')}</span>}
       <span className={`role-tag rt-${row._source || 'user'}`}>{row._reporterRole}</span></span>
   );
   // Admin Actions: show the admin's name, email as tooltip + secondary line.

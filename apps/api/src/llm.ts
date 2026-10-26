@@ -9,7 +9,34 @@
 import { Logger } from '@nestjs/common';
 
 export type Msg = { role: string; content: string | null; tool_calls?: any[]; tool_call_id?: string; name?: string };
-export type LlmResult = { ok: true; message: Msg } | { ok: false; error: string; status?: number };
+export type LlmResult = { ok: true; message: Msg; usage?: LlmUsage; model?: string } | { ok: false; error: string; status?: number };
+export type LlmUsage = { promptTokens?: number; completionTokens?: number; totalTokens?: number };
+/** What a call was for — recorded by the usage sink (Settings → AI → Usage). */
+export type UsageCtx = { feature: 'chat' | 'chat_title' | 'incident_text' | 'regenerate' | string; adminId?: string | null; adminEmail?: string | null; ref?: string | null; summary?: string | null };
+export type UsageEvent = UsageCtx & LlmUsage & { model?: string | null; durationMs: number; ok: boolean; error?: string | null };
+let usageSink: ((e: UsageEvent) => void) | null = null;
+/** Registered once by AiUsageService; llm() reports every provider call to it (fire-and-forget). */
+export function setUsageSink(fn: (e: UsageEvent) => void) { usageSink = fn; }
+
+/** Provider usage block (OpenAI shape; also tolerates vLLM/RunPod wrappers and Anthropic-style keys). */
+export function extractUsage(j: any): LlmUsage | undefined {
+  let x = j;
+  for (let i = 0; i < 4 && x; i++) {
+    if (Array.isArray(x)) { x = x[0]; continue; }
+    const u = x.usage;
+    if (u && typeof u === 'object') {
+      const n = (v: any) => (Number.isFinite(Number(v)) && v !== null && v !== undefined ? Number(v) : undefined);
+      const promptTokens = n(u.prompt_tokens ?? u.input_tokens);
+      const completionTokens = n(u.completion_tokens ?? u.output_tokens);
+      const totalTokens = n(u.total_tokens) ?? (promptTokens !== undefined || completionTokens !== undefined ? (promptTokens || 0) + (completionTokens || 0) : undefined);
+      return { promptTokens, completionTokens, totalTokens };
+    }
+    if (x.output !== undefined) { x = x.output; continue; }
+    if (x.data) { x = x.data; continue; }
+    break;
+  }
+  return undefined;
+}
 
 const log = new Logger('AI');
 let discoveredModel: string | null = null;
@@ -147,10 +174,22 @@ async function pickModel(base: string, key: string): Promise<string | null> {
   return id;
 }
 
-/** One chat completion. Returns null when not configured. */
-export async function llm(messages: Msg[], tools?: any[]): Promise<LlmResult | null> {
+/** One chat completion. Returns null when not configured. `ctx` tags the call for the usage log. */
+export async function llm(messages: Msg[], tools?: any[], ctx?: UsageCtx): Promise<LlmResult | null> {
   const base = aiBase(); const key = (process.env.OPENAI_API_KEY || '').trim();
   if (!base || !key) return null;
+  const t0 = Date.now();
+  const r = await llmCall(base, key, messages, tools);
+  if (usageSink) {
+    try {
+      usageSink({ ...(ctx || { feature: 'other' }), durationMs: Date.now() - t0, ok: r.ok, error: r.ok ? null : r.error,
+        model: (r.ok && r.model) || discoveredModel || (process.env.OPENAI_MODEL || '').trim() || null, ...(r.ok ? r.usage || {} : {}) });
+    } catch { /* never let logging break a call */ }
+  }
+  return r;
+}
+
+async function llmCall(base: string, key: string, messages: Msg[], tools?: any[]): Promise<LlmResult> {
   const url = `${base}/chat/completions`;
   const deadline = Date.now() + timeoutMs();
   let model = discoveredModel || (process.env.OPENAI_MODEL || '').trim() || 'gpt-4o-mini';
@@ -173,7 +212,7 @@ export async function llm(messages: Msg[], tools?: any[]): Promise<LlmResult | n
       if (j?.status === 'FAILED' || j?.error) { lastErr = `provider error: ${String(j?.error?.message || j?.error || 'FAILED').slice(0, 200)}`; log.warn(lastErr); break; }
       const m = extractMessage(j);
       if (!m) { lastErr = 'unrecognised reply shape'; log.warn(`AI reply had no choices: ${String(r.text || '').slice(0, 400)}`); break; }
-      return { ok: true, message: { role: 'assistant', content: m.content, tool_calls: m.tool_calls } };
+      return { ok: true, message: { role: 'assistant', content: m.content, tool_calls: m.tool_calls }, usage: extractUsage(j), model: typeof j?.model === 'string' ? j.model : model };
     }
     const detail = String(r.json?.error?.message || r.json?.message || r.json?.detail || r.text || '').slice(0, 300);
     log.warn(`AI provider ${r.status} (model ${model}) → ${url}: ${detail}`);

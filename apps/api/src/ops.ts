@@ -416,7 +416,7 @@ export class IncidentsController {
     if (!aiConfigured()) throw new BadRequestException('AI is not configured — set OPENAI_BASE_URL and OPENAI_API_KEY on the API');
     const inc = await this.prisma.incident.findUnique({ where: { publicId } });
     if (!inc) throw new NotFoundException('Report not found');
-    const r = await this.ai.generate(inc.id, 'aiRegenerate');
+    const r = await this.ai.generate(inc.id, 'aiRegenerate', admin);
     if (!r) throw new BadRequestException('The AI model did not return a usable summary — try again shortly');
     await this.act.audit(admin, 'incident.ai', 'incident', inc.publicId, `Generated AI summary: ${r.title}`);
     this.act.changed(['reports'], inc.publicId);

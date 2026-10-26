@@ -1,7 +1,7 @@
 'use client';
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowRight, Eye, EyeOff, Lock, Mail, ShieldHalf } from 'lucide-react';
+import { ArrowRight, Eye, EyeOff, Handshake, Lock, Mail, MapPinned, Radar, ShieldHalf } from 'lucide-react';
 import { api } from '@/lib/api';
 
 function LoginForm() {
@@ -37,7 +37,6 @@ function LoginForm() {
           <input id="pw" className="input" style={{ paddingLeft: 36, paddingRight: 40 }} type={show ? 'text' : 'password'} autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
           <button type="button" className="icon-btn" style={{ position: 'absolute', right: 2, top: 1 }} onClick={() => setShow((s) => !s)} data-tip={show ? 'Hide password' : 'Show password'} aria-label="Toggle password">{show ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div>
       <button className="btn btn-primary" style={{ width: '100%', height: 44, justifyContent: 'center', marginTop: 6 }} disabled={busy}>{busy ? 'Signing in…' : <>Sign in <ArrowRight size={16} /></>}</button>
-      <p className="hint" style={{ marginTop: 18, textAlign: 'center' }}>Sessions expire after 12 hours · times shown in Africa/Lagos</p>
     </form>
   );
 }
@@ -48,10 +47,17 @@ export default function LoginPage() {
       <section className="login-art">
         <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 10 }}><span className="crest">AB</span><b>Abia Control Room</b></div>
         <div style={{ position: 'relative', zIndex: 1 }}>
-          <h1>Every report, agent and alarm — one live picture.</h1>
+          <h1>Every report, agent and alarm - one live picture.</h1>
           <p>AcIntel turns Homeland reports, alarms and field agents into actionable intelligence for the Abia control room.</p>
         </div>
-        <div className="login-stats"><div><b>17</b><small>LGAs covered</small></div><div><b>14</b><small>Partner agencies</small></div><div><b>24/7</b><small>Live monitoring</small></div></div>
+        <div className="login-stats">
+          {([[MapPinned, '17', 'LGAs covered', 'ls-blue'], [Handshake, '14', 'Partner agencies', 'ls-green'], [Radar, '24/7', 'Live monitoring', 'ls-rose']] as const).map(([Icon, n, l, tone], i) => (
+            <div key={l} className={`ls-item ${tone}`} style={{ animationDelay: `${120 + i * 90}ms` }}>
+              <span className="ls-ico"><Icon size={18} strokeWidth={2.1} />{tone === 'ls-rose' && <i className="ls-live" />}</span>
+              <span className="ls-txt"><b>{n}</b><small>{l}</small></span>
+            </div>
+          ))}
+        </div>
       </section>
       <section className="login-form"><Suspense><LoginForm /></Suspense></section>
     </div>

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Download, MessageSquarePlus, Send, Sparkles, X } from 'lucide-react';
 import { api, timeAgo } from '@/lib/api';
 import { useApp } from './providers';
+import { stripExportLinks } from '@/lib/ai-text';
 
 type Sess = { id: string; title: string; updatedAt: string };
 type Meta = { exports?: { id: string; name: string; rows: number; url: string }[]; tables?: { title: string; columns: { key: string; label: string }[]; rows: any[]; total: number }[]; tools?: string[]; stub?: boolean };
@@ -22,7 +23,7 @@ function MsgView({ m }: { m: Msg }) {
   if (m.status === 'pending') return <div className="msg assistant"><span className="typing"><i /><i /><i /></span></div>;
   return (
     <div className={`msg ${m.role}`}>
-      <Md text={m.content} />
+      <Md text={m.role === 'assistant' ? stripExportLinks(m.content) : m.content} />
       {m.meta?.tables?.map((t) => (
         <div key={t.title} style={{ marginTop: 8 }}>
           <div className="hint" style={{ marginBottom: 4 }}>{t.title}{t.total > t.rows.length ? ` · first ${t.rows.length} of ${t.total}` : ''}</div>
@@ -64,7 +65,7 @@ export function AiFab() {
     if (!m || m.status === 'pending') return false;
     setPending((p) => { const n = { ...p }; delete n[messageId]; return n; });
     if (m.sessionId === curRef.current) setMsgs((list) => list.map((x) => (x.id === messageId ? { ...m, role: 'assistant' } : x)));
-    loadSessions();
+    loadSessions(); setTimeout(loadSessions, 4000); // title is generated just after the reply (pushed via ai.title; this heals a missed push)
     if (!openRef.current) { setUnseen(true); toast('AcIntel Assist finished a task in the background', 'info'); }
     return true;
   }, [toast]);
@@ -73,6 +74,11 @@ export function AiFab() {
     const h = (e: Event) => { const id = (e as CustomEvent).detail?.messageId; if (id && pending[id]) settle(id); };
     window.addEventListener('acintel:ai', h); return () => window.removeEventListener('acintel:ai', h);
   }, [pending, settle]);
+  // Generated conversation title landed (after the first real exchange) → patch the Sessions list in place.
+  useEffect(() => {
+    const h = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.sessionId && d.title) setSessions((list) => list.map((x) => (x.id === d.sessionId ? { ...x, title: d.title } : x))); };
+    window.addEventListener('acintel:ai-title', h); return () => window.removeEventListener('acintel:ai-title', h);
+  }, []);
   // Heal: if the stream is down, check pending messages every 5s (only while something is pending).
   useEffect(() => {
     if (!busy || live === 'live') return;

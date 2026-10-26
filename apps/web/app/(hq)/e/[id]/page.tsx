@@ -1,7 +1,8 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowUpRight, Ban, Bot, CalendarDays, MessageSquareQuote, RefreshCw, Sparkles, UserRoundSearch, CheckCircle2, ExternalLink, FileText, Fingerprint, ImagePlus, KeyRound, Link2, Pencil, Send, ShieldCheck, Trash2, UserCheck, Users, XCircle } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ArrowUpRight, AtSign, Ban, EyeOff, ImageOff, MapPin, Phone, Bot, CalendarDays, MessageSquareQuote, RefreshCw, Sparkles, UserRoundSearch, CheckCircle2, ExternalLink, FileText, MessageCircle, Fingerprint, KeyRound, Link2, Pencil, Send, ShieldCheck, UserCheck, Users, XCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { PageHead } from '@/components/shell';
 import { DataTable, Row, Col } from '@/components/ui';
@@ -37,45 +38,21 @@ function Activity({ days, keys, onDay }: { days: NonNullable<Ent['activity']>; k
   );
 }
 
-function MediaPanel({ id, media, ops, onChange }: { id: string; media: Media[]; ops: boolean; onChange: () => void }) {
-  const { toast, confirm } = useApp();
-  const [url, setUrl] = useState(''); const [busy, setBusy] = useState(false); const [drag, setDrag] = useState(false);
-  const inp = useRef<HTMLInputElement>(null);
-  const upload = async (files: FileList | null) => {
-    if (!files?.length) return; setBusy(true);
-    for (const file of Array.from(files)) {
-      const fd = new FormData(); fd.append('file', file);
-      try { const r = await fetch(`/api/incidents/${id}/media`, { method: 'POST', body: fd, credentials: 'include' }); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || `Upload failed (${r.status})`); toast(`Attached ${file.name}`); }
-      catch (e: any) { toast(e.message, 'error'); }
-    }
-    setBusy(false); onChange();
-  };
-  const addUrl = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!url.trim()) return; setBusy(true);
-    try { await api(`/incidents/${id}/media/url`, { method: 'POST', json: { url: url.trim() } }); setUrl(''); toast('Link attached'); onChange(); } catch (x: any) { toast(x.message, 'error'); } finally { setBusy(false); }
-  };
-  const del = async (m: Media) => { if (await confirm({ title: `Remove ${m.filename}?`, body: 'The file is deleted from storage.', confirm: 'Remove', danger: true })) { try { await api(`/media/${m.id}`, { method: 'DELETE' }); toast('Media removed'); onChange(); } catch (x: any) { toast(x.message, 'error'); } } };
+/** Evidence sent by the reporter at the point of the report — view-only for the control room. */
+function MediaPanel({ media }: { media: Media[] }) {
   return (
     <div className="card card-pad" style={{ marginBottom: 16 }}>
-      <div className="card-head" style={{ padding: 0, marginBottom: 10 }}><div><h3>Evidence & Media</h3><p>{media.length} attached · images, video, audio, PDF (upload) or any https link</p></div></div>
-      <div className="media-grid">
+      <div className="card-head" style={{ padding: 0, marginBottom: 10 }}><div><h3>Evidence & Media</h3><p>{media.length ? `${media.length} file${media.length === 1 ? '' : 's'} sent by the reporter with this report` : 'Photos, video or files sent by the reporter appear here'}</p></div></div>
+      {media.length ? <div className="media-grid">
         {media.map((m) => (
           <div key={m.id} className="media-item">
-            <a href={m.url} target="_blank" rel="noreferrer" data-tip={`${m.filename} · ${m.by}`}>
+            <a href={m.url} target="_blank" rel="noreferrer" data-tip={`Open ${m.filename}`}>
               {m.kind === 'image' ? <img src={m.url} alt={m.filename} loading="lazy" /> : m.kind === 'video' && m.storage === 'local' ? <video src={m.url} muted preload="metadata" /> : <div className="m-ph">{m.kind === 'link' ? <Link2 size={22} /> : <FileText size={22} />}<span>{m.kind}</span></div>}
             </a>
             <div className="m-cap"><span>{m.filename}</span><small>{m.date}</small></div>
-            {ops && <button className="m-del" onClick={() => del(m)} aria-label="Remove" data-tip="Remove"><Trash2 size={13} /></button>}
           </div>
         ))}
-      </div>
-      {ops && <>
-        <div className={`dropzone ${drag ? 'over' : ''}`} style={{ marginTop: media.length ? 12 : 0 }} onClick={() => inp.current?.click()} onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); upload(e.dataTransfer.files); }}>
-          <ImagePlus size={18} /> {busy ? 'Uploading…' : 'Drop files here or click to upload'}
-          <input ref={inp} type="file" hidden multiple accept="image/*,video/*,audio/*,application/pdf" onChange={(e) => upload(e.target.files)} />
-        </div>
-        <form onSubmit={addUrl} style={{ display: 'flex', gap: 8, marginTop: 10 }}><input className="input" placeholder="…or paste a media URL (https://)" value={url} onChange={(e) => setUrl(e.target.value)} /><button className="btn" disabled={busy || !url}><Link2 size={14} /> Attach Link</button></form>
-      </>}
+      </div> : <div className="media-empty"><ImageOff size={18} /> No media was sent with this report</div>}
     </div>
   );
 }
@@ -103,7 +80,9 @@ function IncidentText({ raw, id, ops, onChange }: { raw: any; id: string; ops: b
       <div className="card card-pad orig-card">
         <div className="ai-head"><span className="ai-ico orig"><MessageSquareQuote size={15} /></span><div><h3>Reporter&apos;s Original Report</h3><p>Exactly as submitted · {raw.date}</p></div></div>
         <blockquote className="orig-body">{raw.details}</blockquote>
-        <div className="ai-foot"><span className="who-line">{raw.reporterHref ? <Link className="cell-link" href={raw.reporterHref}>{raw.reporter}</Link> : <b>{raw.reporter}</b>}<span className={`role-tag rt-${raw.source || 'user'}`}>{raw.sourceLabel}</span></span><span className="hint">{raw.location}</span></div>
+        <div className="ai-foot"><span className="who-line">{raw.anonymous ? <b className="anon"><EyeOff size={13} /> Anonymous</b> : raw.reporterHref ? <Link className="cell-link" href={raw.reporterHref}>{raw.reporter}</Link> : <b>{raw.reporter}</b>}<span className={`role-tag rt-${raw.source || 'user'}`}>{raw.sourceLabel}</span></span>
+          {raw.anonymous ? <span className="hint">Identity withheld by the reporter</span> : (raw.reporterPhone || raw.reporterEmail) && <span className="who-contact">{raw.reporterPhone && <span><Phone size={12} />{raw.reporterPhone}</span>}{raw.reporterEmail && <span><AtSign size={12} />{raw.reporterEmail}</span>}{raw.reporterLga && <span><MapPin size={12} />{raw.reporterLga}</span>}</span>}
+          <span className="hint">{raw.location}</span></div>
       </div>
     </div>
   );
@@ -111,6 +90,7 @@ function IncidentText({ raw, id, ops, onChange }: { raw: any; id: string; ops: b
 
 export default function EntityPage({ params }: { params: { id: string } }) {
   const { can, confirm, toast, refreshCounts, openDay } = useApp();
+  const router = useRouter();
   const ops = can('ops');
   const [e, setE] = useState<Ent | null>(null);
   const [err, setErr] = useState('');
@@ -146,7 +126,11 @@ export default function EntityPage({ params }: { params: { id: string } }) {
     {['new', 'dispatched', 'acted'].includes(st) && <><B tone="btn-success" icon={<CheckCircle2 size={15} />} label="Resolve" on={() => incAct('resolved')} /><B tone="btn-danger" icon={<XCircle size={15} />} label="Fake" tip="Mark as fake (reason required)" on={() => incAct('fake')} /></>}</>;
   if (e.type === 'user') actions = st === 'pending' ? <><B tone="btn-success" icon={<CheckCircle2 size={15} />} label="Approve" on={() => statusAct('active', 'Approve')} /><B tone="btn-danger" icon={<Ban size={15} />} label="Suspend" on={() => statusAct('suspended', 'Suspend')} /></>
     : st === 'active' ? <B tone="btn-danger" icon={<Ban size={15} />} label="Suspend" on={() => statusAct('suspended', 'Suspend')} /> : <B tone="btn-success" icon={<UserCheck size={15} />} label="Activate" on={() => statusAct('active', 'Activate')} />;
-  if (e.type === 'agent') actions = <><B icon={<Pencil size={15} />} label="Edit" on={() => setUi('edit')} /><B icon={<Users size={15} />} label="Assign Group" on={() => setUi('assign')} />
+  const message = async () => {
+    try { const r = await api<{ id: string }>('/chats/start', { method: 'POST', json: { agentId: params.id } }); router.push(`/chats?t=${r.id}`); } catch (x: any) { toast(x.message, 'error'); }
+  };
+  if (e.type === 'agent') actions = <><B tone="btn-primary" icon={<MessageCircle size={15} />} label="Send Message" tip={st === 'active' ? 'Open a direct conversation with this agent' : 'Activate the agent to message them'} on={message} />
+    <B icon={<Pencil size={15} />} label="Edit" on={() => setUi('edit')} /><B icon={<Users size={15} />} label="Assign Group" on={() => setUi('assign')} />
     {st === 'suspended' ? <B tone="btn-success" icon={<UserCheck size={15} />} label="Activate" on={() => statusAct('active', 'Activate')} /> : <B tone="btn-danger" icon={<Ban size={15} />} label="Suspend" on={() => statusAct('suspended', 'Suspend')} />}</>;
   if (e.type === 'alarm' && st === 'new') actions = <B tone="btn-success" icon={<CheckCircle2 size={15} />} label="Resolve Alarm" on={async () => { if (await confirm({ title: 'Resolve this alarm?', confirm: 'Resolve' })) post(`/alarms/${params.id}/resolve`, {}, 'Alarm resolved'); }} />;
   if (e.type === 'group' || e.type === 'category') actions = <B icon={<Pencil size={15} />} label="Edit" on={() => setUi('edit')} />;
@@ -188,7 +172,7 @@ export default function EntityPage({ params }: { params: { id: string } }) {
       </div>
       {e.type === 'incident' && e.raw && <IncidentText raw={e.raw} id={params.id} ops={ops} onChange={load} />}
       {e.activity && <Activity days={e.activity} keys={e.activityKeys || ACT_KEYS} onDay={(d) => openDay(d, params.id)} />}
-      {e.type === 'incident' && <MediaPanel id={params.id} media={e.media || []} ops={ops} onChange={load} />}
+      {e.type === 'incident' && <MediaPanel media={e.media || []} />}
       {e.related.map((r) => <div key={r.title} style={{ marginBottom: 16 }}><h3 style={{ margin: '0 0 8px' }}>{r.title} <span className="chip">{r.rows.length}</span></h3><DataTable scroll columns={r.columns} rows={r.rows} linkKey={r.linkKey} exportName={`${e.type}-${r.title.toLowerCase().replace(/\s+/g, '-')}`} /></div>)}
       {!!e.timeline?.length && <div style={{ marginBottom: 16 }}><h3 style={{ margin: '0 0 8px' }}>Audit Trail <span className="chip">{e.timeline.length}</span></h3><DataTable scroll columns={TL_COLS} rows={e.timeline.map(({ _id, ...r }) => r)} exportName={`${e.type}-audit`} /></div>}
       {ui === 'dispatch' && <DispatchOverlay report={{ _id: params.id, category: e.title, title: e.raw?.title, details: e.raw?.details, location: e.fields.Location, lga: e.fields.LGA, status: st, date: e.fields['Report Date'] }} onClose={() => setUi('')} onDone={done} />}

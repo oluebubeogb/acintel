@@ -31,15 +31,19 @@ export const agentRow = (a: any): Row => ({
   _links: clean({ group: a.group ? `/e/${a.group.publicId}` : null }),
 });
 /** Who filed it: the agent (source=agent), the app user, or the desk for call-centre/ECC intake. */
-export const reporterOf = (i: any): { name: string; href: string | null } =>
-  i.agentReporter ? { name: i.agentReporter.name, href: `/e/${i.agentReporter.publicId}` }
-  : i.reporter ? { name: i.reporter.name, href: `/e/${i.reporter.publicId}` }
-  : { name: i.source === 'call_centre' ? 'Call Centre Desk' : i.source === 'ecc' ? 'ECC Desk' : 'Anonymous', href: null };
+export type Reporter = { name: string; href: string | null; phone: string | null; email: string | null; lga: string | null; anonymous: boolean };
+/** Who filed the report. Anonymous reports never expose identity, whatever the source. */
+export const reporterOf = (i: any): Reporter =>
+  i.anonymous ? { name: 'Anonymous', href: null, phone: null, email: null, lga: null, anonymous: true }
+  : i.agentReporter ? { name: i.agentReporter.name, href: `/e/${i.agentReporter.publicId}`, phone: i.agentReporter.phone || null, email: i.agentReporter.email || null, lga: i.agentReporter.lga || null, anonymous: false }
+  : i.reporter ? { name: i.reporter.name, href: `/e/${i.reporter.publicId}`, phone: i.reporter.phone || null, email: i.reporter.email || null, lga: i.reporter.lga || null, anonymous: false }
+  : i.reporterName ? { name: i.reporterName, href: null, phone: i.reporterPhone || null, email: i.reporterEmail || null, lga: i.reporterLga || null, anonymous: false }
+  : { name: 'Anonymous', href: null, phone: null, email: null, lga: null, anonymous: true };
 export const incidentRow = (i: any): Row => {
   const rep = reporterOf(i);
   return {
     _id: i.publicId, category: i.category, title: i.aiTitle || localTitle(i.details, i.category), details: i.details, location: i.location, lga: i.lga,
-    reporter: rep.name, _reporterRole: SOURCE_LABEL[i.source] || 'User', source: SOURCE_LABEL[i.source] || 'User', _source: i.source || 'user',
+    reporter: rep.name, _anon: rep.anonymous, _reporterPhone: rep.phone, _reporterEmail: rep.email, _reporterLga: rep.lga, _reporterRole: SOURCE_LABEL[i.source] || 'User', source: SOURCE_LABEL[i.source] || 'User', _source: i.source || 'user',
     status: i.status, date: fmt(i.createdAt), _ts: i.createdAt, _aiTitle: !!i.aiTitle,
     _links: clean({ reporter: rep.href, category: undefined }),
   };

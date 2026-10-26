@@ -142,6 +142,7 @@ model Agent {
   createdAt  DateTime       @default(now())
   tasks      AgentTask[]
   reports    Incident[]     @relation("AgentReports") // incidents this agent filed (source = agent)
+  chatThread ChatThread?
 
   @@index([status])
   @@index([lga])
@@ -169,36 +170,43 @@ model AgentTask {
 }
 
 model Incident {
-  id          String          @id @default(cuid())
-  publicId    String          @unique
-  legacyId    String?         @unique
-  category    String // category name snapshot (kept in sync on rename)
-  categoryId  String?
-  categoryRef ReportCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  details     String
-  location    String
-  lga         String
-  lat         Float?
-  lng         Float?
-  status      String          @default("new") // new | dispatched | acted | resolved | fake
-  reporterId  String?
-  reporter    User?           @relation(fields: [reporterId], references: [id], onDelete: SetNull)
+  id              String          @id @default(cuid())
+  publicId        String          @unique
+  legacyId        String?         @unique
+  category        String // category name snapshot (kept in sync on rename)
+  categoryId      String?
+  categoryRef     ReportCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  details         String
+  location        String
+  lga             String
+  lat             Float?
+  lng             Float?
+  status          String          @default("new") // new | dispatched | acted | resolved | fake
+  reporterId      String?
+  reporter        User?           @relation(fields: [reporterId], references: [id], onDelete: SetNull)
   /// Where the report came from: user (app) | agent (field agent app) | call_centre | ecc
-  source      String          @default("user")
+  source          String          @default("user")
   agentReporterId String?
-  agentReporter   Agent?      @relation("AgentReports", fields: [agentReporterId], references: [id], onDelete: SetNull)
+  agentReporter   Agent?          @relation("AgentReports", fields: [agentReporterId], references: [id], onDelete: SetNull)
+  /// Caller details for reports with no app account (Call Centre / ECC phone-ins). Null for app reporters.
+  reporterName    String?
+  reporterPhone   String?
+  reporterEmail   String?
+  reporterLga     String?
+  /// Reporter chose to stay anonymous — identity is never shown (any source).
+  anonymous       Boolean         @default(false)
   /// Short AI headline + longer AI summary of `details` (the reporter's raw words). Null until generated.
-  aiTitle     String?
-  aiSummary   String?
-  aiAt        DateTime?
-  createdAt   DateTime        @default(now())
-  actedAt     DateTime?
-  resolvedAt  DateTime?
-  resolvedBy  String?
-  note        String?
-  dispatches  Dispatch[]
-  media       IncidentMedia[]
-  tasks       AgentTask[]
+  aiTitle         String?
+  aiSummary       String?
+  aiAt            DateTime?
+  createdAt       DateTime        @default(now())
+  actedAt         DateTime?
+  resolvedAt      DateTime?
+  resolvedBy      String?
+  note            String?
+  dispatches      Dispatch[]
+  media           IncidentMedia[]
+  tasks           AgentTask[]
 
   @@index([status])
   @@index([createdAt])
@@ -256,6 +264,7 @@ model AiSession {
   adminId   String
   admin     AdminUser   @relation(fields: [adminId], references: [id], onDelete: Cascade)
   title     String
+  titled    Boolean     @default(false) // true once a generated (LLM or local) conversation title replaced the placeholder
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
   messages  AiMessage[]
@@ -312,4 +321,63 @@ model SecurityAlert {
   group     String   @default("All")
   sender    String
   createdAt DateTime @default(now())
+}
+
+/// One row per AI provider call (Settings → AI → Usage). Tokens come from the provider's `usage` block when it sends one.
+model AiUsage {
+  id               String   @id @default(cuid())
+  feature          String // chat | chat_title | incident_text | regenerate | other
+  adminId          String?
+  adminEmail       String?
+  model            String?
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  durationMs       Int
+  ok               Boolean  @default(true)
+  error            String?
+  ref              String? // incident publicId or AI session id
+  summary          String? // short "what was done"
+  createdAt        DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([feature, createdAt])
+}
+
+/// Direct messages between one field agent and the state control room (superadmin + controller share the desk).
+model ChatThread {
+  id            String        @id @default(cuid())
+  publicId      String        @unique
+  agentId       String        @unique
+  agent         Agent         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  lastMessageAt DateTime      @default(now())
+  lastPreview   String?
+  lastSender    String? // admin | agent
+  createdAt     DateTime      @default(now())
+  messages      ChatMessage[]
+
+  @@index([lastMessageAt])
+}
+
+/// kind: text | image | voice. Attachments live in the uploads volume under chats/<thread>/; `readAt` is set when
+/// the control room opens an agent message (agent → HQ) or when the agents' app acknowledges an HQ message.
+model ChatMessage {
+  id          String     @id @default(cuid())
+  publicId    String     @unique
+  threadId    String
+  thread      ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender      String // admin | agent
+  adminId     String?
+  adminName   String?
+  body        String?
+  kind        String     @default("text")
+  file        String? // relative path in UPLOAD_DIR
+  mime        String?
+  size        Int?
+  durationSec Float?
+  readAt      DateTime?
+  createdAt   DateTime   @default(now())
+
+  @@index([threadId, createdAt])
+  @@index([sender, readAt])
 }

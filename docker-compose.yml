@@ -61,6 +61,9 @@ services:
       LOGIN_WINDOW_MINUTES: ${LOGIN_WINDOW_MINUTES:-15}
       UPLOAD_DIR: /data/uploads
       MEDIA_MAX_MB: ${MEDIA_MAX_MB:-25}
+      CHAT_MAX_UPLOAD_MB: ${CHAT_MAX_UPLOAD_MB:-25}
+      CHAT_INBOUND_KEY: ${CHAT_INBOUND_KEY:-}
+      CHAT_DEMO_REPLIES: ${CHAT_DEMO_REPLIES:-}
       MAP_STYLE_URL: ${MAP_STYLE_URL:-}
       MAP_TILE_URL: ${MAP_TILE_URL:-https://tile.openstreetmap.org/{z}/{x}/{y}.png}
       MAP_ATTRIBUTION: ${MAP_ATTRIBUTION:-© OpenStreetMap contributors}

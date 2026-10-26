@@ -113,12 +113,14 @@ export class IncidentAiWorker implements OnModuleInit, OnModuleDestroy {
 
   /** Generate (or regenerate) AI title + summary for one incident. Returns null when AI is not configured/failed. */
   /** `feature` = which Settings switch gates this call (background worker vs on-demand regenerate). Local titles are unaffected. */
-  async generate(id: string, feature: AiFeature = 'aiIncidentText'): Promise<{ title: string; summary: string } | null> {
+  async generate(id: string, feature: AiFeature = 'aiIncidentText', by?: { id: string; email: string }): Promise<{ title: string; summary: string } | null> {
     if (!aiConfigured() || !(await aiOn(this.prisma, feature))) return null;
     const i = await this.prisma.incident.findUnique({ where: { id } });
     if (!i) return null;
     await this.prisma.incident.update({ where: { id }, data: { aiAt: new Date() } });
-    const r = await llm([{ role: 'system', content: PROMPT }, { role: 'user', content: `Category: ${i.category}\nLGA: ${i.lga}\nLocation: ${i.location}\nReport: ${i.details}` }]);
+    const r = await llm([{ role: 'system', content: PROMPT }, { role: 'user', content: `Category: ${i.category}\nLGA: ${i.lga}\nLocation: ${i.location}\nReport: ${i.details}` }],
+      undefined, { feature: feature === 'aiRegenerate' ? 'regenerate' : 'incident_text', adminId: by?.id, adminEmail: by?.email, ref: i.publicId,
+        summary: `${feature === 'aiRegenerate' ? 'Regenerated' : 'Wrote'} title & summary · ${i.category} · ${i.lga}` });
     if (!r || !r.ok || !r.message.content) return null;
     const out = parseAi(r.message.content);
     if (out) await this.prisma.incident.update({ where: { id }, data: { aiTitle: out.title, aiSummary: out.summary || null } });

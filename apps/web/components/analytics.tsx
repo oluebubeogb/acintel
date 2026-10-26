@@ -13,7 +13,7 @@ type A = { from: string; to: string; totals: { incidents: number; byStatus: Reco
   byCategory: { name: string; count: number }[]; byLga: { name: string; count: number }[]; byAgency: { name: string; count: number }[]; byDay: { day: string; label: string; total: number; resolved: number }[] };
 type Drill = { kind: string; title: string; query: Record<string, string> };
 type Kpi = { label: string; v: number | string; accent: string; icon: string; tip: string; drill?: Drill };
-const SRC: Record<string, { icon: string; accent: string; label: string }> = { user: { icon: 'user', accent: '#2563eb', label: 'From Users' }, agent: { icon: 'agent', accent: '#16a34a', label: 'From Agents' }, call_centre: { icon: 'headset', accent: '#ea580c', label: 'Call Centre' }, ecc: { icon: 'radio', accent: '#7c3aed', label: 'ECC' } };
+const SRC: Record<string, { icon: string; accent: string; label: string }> = { user: { icon: 'user', accent: '#d99a06', label: 'From Users' }, agent: { icon: 'agent', accent: '#e0413f', label: 'From Agents' }, call_centre: { icon: 'headset', accent: '#4a3f9f', label: 'Call Centre' }, ecc: { icon: 'radio', accent: '#0ea5e9', label: 'ECC' } };
 const back = (n: number) => { const d = new Date(Date.now() - n * 86400000); return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Lagos' }).format(d); };
 
 /** Analytics over any date range; CSV pack = one file with every section. */

@@ -7,10 +7,10 @@ import {
 
 const MAP: [RegExp, LucideIcon, string][] = [
   [/government tag|\btag\b/i, IdCard, '#7c3aed'],
-  [/first name|last name|^name|sender|reporter|admin|by$/i, User, '#2563eb'],
   [/phone/i, Phone, '#0d9488'],
   [/email/i, AtSign, '#db2777'],
   [/lga|location|base/i, MapPin, '#ea580c'],
+  [/first name|last name|^name|sender|reporter|admin|by$/i, User, '#2563eb'],
   [/group|agency|agencies/i, Users, '#4f46e5'],
   [/presence|online/i, Signal, '#16a34a'],
   [/status/i, BadgeCheck, '#10b981'],

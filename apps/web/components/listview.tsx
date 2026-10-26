@@ -26,7 +26,7 @@ type Filt = { lga: string; status: string; group: string; category: string; peri
 const SOURCES = [['user', 'User'], ['agent', 'Agent'], ['call_centre', 'Call Centre'], ['ecc', 'ECC']] as const;
 const INC_STATUS = [['new', 'New'], ['dispatched', 'Dispatched'], ['acted', 'Acted Upon'], ['resolved', 'Resolved']] as const;
 const SOURCE_PAGE: Record<string, string> = { 'reports.users': 'user', 'reports.agents': 'agent', 'reports.call-centre': 'call_centre', 'reports.ecc': 'ecc' };
-const SOURCE_STYLE: Record<string, { icon: string; accent: string; href: string }> = { user: { icon: 'user', accent: '#2563eb', href: '/reports/users' }, agent: { icon: 'agent', accent: '#16a34a', href: '/reports/agents' }, call_centre: { icon: 'headset', accent: '#ea580c', href: '/reports/call-centre' }, ecc: { icon: 'radio', accent: '#7c3aed', href: '/reports/ecc' } };
+const SOURCE_STYLE: Record<string, { icon: string; accent: string; href: string }> = { user: { icon: 'user', accent: '#d99a06', href: '/reports/users' }, agent: { icon: 'agent', accent: '#e0413f', href: '/reports/agents' }, call_centre: { icon: 'headset', accent: '#4a3f9f', href: '/reports/call-centre' }, ecc: { icon: 'radio', accent: '#0ea5e9', href: '/reports/ecc' } };
 
 /** Which server-side filters each list offers. */
 function filtersFor(key: string): (keyof Filt)[] {

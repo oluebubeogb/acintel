@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { Copy, KeyRound, Send, Upload, UserPlus, Users } from 'lucide-react';
 import { api, titleCase } from '@/lib/api';
 import { useApp } from './providers';
-import { ImportModal, Modal } from './ui';
+import { ImportModal, InfoTip, Modal } from './ui';
 
 export const LGAS = ['Aba North', 'Aba South', 'Arochukwu', 'Bende', 'Ikwuano', 'Isiala Ngwa North', 'Isiala Ngwa South', 'Isuikwuato', 'Obi Ngwa', 'Ohafia', 'Osisioma', 'Ugwunagbo', 'Ukwa East', 'Ukwa West', 'Umuahia North', 'Umuahia South', 'Umu Nneochi'];
 export type Group = { publicId: string; name: string; status: string; lga?: string | null };
@@ -22,8 +22,9 @@ function useForm(init: F) {
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((x) => ({ ...x, [k]: e.target.value }));
   return { f, setF, set };
 }
-const Field = ({ label, children, full, hint }: { label: string; children: React.ReactNode; full?: boolean; hint?: string }) => (
-  <div className="field" style={full ? { gridColumn: '1 / -1' } : undefined}><label className="label">{titleCase(label)}</label>{children}{hint && <div className="hint" style={{ marginTop: 4 }}>{hint}</div>}</div>
+/** `hint` = helper copy shown as a tooltip on the label; `note` = a short always-visible warning. */
+const Field = ({ label, children, full, hint, note }: { label: string; children: React.ReactNode; full?: boolean; hint?: string; note?: string }) => (
+  <div className="field" style={full ? { gridColumn: '1 / -1' } : undefined}><label className="label label-tip">{titleCase(label)}{hint && <InfoTip text={hint} />}</label>{children}{note && <div className="hint" style={{ marginTop: 4 }}>{note}</div>}</div>
 );
 const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 };
 
@@ -204,7 +205,7 @@ export function SendAlertForm({ onSent }: { onSent: () => void }) {
         <Field label="Alert title" full><input className="input" required maxLength={140} value={f.title} onChange={set('title')} placeholder="e.g. Avoid Ariaria junction this evening" /></Field>
         <Field label="LGA"><select className="select" value={f.lga} onChange={set('lga')}>{(o?.lgas || ['All', ...LGAS]).map((l) => <option key={l}>{l}</option>)}</select></Field>
         <Field label="User type"><select className="select" value={f.userType} onChange={(e) => setF({ ...f, userType: e.target.value, group: e.target.value === 'Users' ? 'All' : f.group })}>{(o?.userTypes || ['All', 'Users', 'Agents']).map((l) => <option key={l}>{l}</option>)}</select></Field>
-        <Field label="Homeland group" hint={f.group !== 'All' ? 'Group targets agents only' : undefined}><select className="select" value={f.group} onChange={set('group')} disabled={f.userType === 'Users'}>{(o?.groups || ['All']).map((l) => <option key={l}>{l}</option>)}</select></Field>
+        <Field label="Homeland group" note={f.group !== 'All' ? 'Group targets agents only' : undefined}><select className="select" value={f.group} onChange={set('group')} disabled={f.userType === 'Users'}>{(o?.groups || ['All']).map((l) => <option key={l}>{l}</option>)}</select></Field>
         <Field label="Alert description" full><textarea className="textarea" required maxLength={4000} value={f.body} onChange={set('body')} /></Field>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>

@@ -7,6 +7,8 @@ import { opaqueId } from './util';
 import { assignAgents } from './tasks';
 import { LGAS, normLga, pointIn } from './geo';
 import { narrative } from './incident-text';
+import { ANON_RATE, caller } from './reporters';
+import { PLACEHOLDER_TITLE, isSmallTalk, localChatTitle } from './chat-title';
 
 const prisma = new PrismaClient();
 let s = 20261025;
@@ -38,6 +40,12 @@ async function ensureReference(email: string, passwordHash: string) {
 
 /** Idempotent backfills so upgraded databases get the Phase 1–6 fields populated. */
 async function ensureBackfill() {
+  // Assist sessions created before generated titles: replace the raw first message with a short intent title (once — skipped when it already matches).
+  for (const ss of await prisma.aiSession.findMany({ where: { titled: false }, include: { messages: { where: { role: 'user' }, orderBy: { createdAt: 'asc' }, take: 5 } } })) {
+    const first = ss.messages.map((m) => m.content).find((c) => c && !isSmallTalk(c));
+    const t = first ? localChatTitle(first) : PLACEHOLDER_TITLE;
+    if (t !== ss.title) await prisma.aiSession.update({ where: { id: ss.id }, data: { title: t, updatedAt: ss.updatedAt } });
+  }
   const labels = new Set<string>([
     ...(await prisma.user.findMany({ where: { device: { not: null } }, distinct: ['device'], select: { device: true } })).map((x) => x.device!),
     ...(await prisma.agent.findMany({ where: { device: { not: null } }, distinct: ['device'], select: { device: true } })).map((x) => x.device!),
@@ -82,6 +90,19 @@ async function ensureBackfill() {
     }
     console.log(`Seed: rewrote ${plain.length} demo incident narratives + sources.`);
   }
+  // Polish 4: demo Call Centre / ECC reports get real caller details; a sprinkle of anonymous reports across every source.
+  // Runs once (only while no incident is flagged anonymous) and only on demo data (SEED_DEMO !== 'false').
+  if (!(await prisma.incident.count({ where: { anonymous: true } }))) {
+    const all = await prisma.incident.findMany({ select: { id: true, source: true, lga: true, reporterId: true, agentReporterId: true, reporterName: true } });
+    let anon = 0, named = 0;
+    for (const i of all) {
+      const noOne = !i.reporterId && !i.agentReporterId && !i.reporterName;
+      if ((i.source === 'user' || i.source === 'agent') && noOne) { await prisma.incident.update({ where: { id: i.id }, data: { anonymous: true } }); anon++; continue; }
+      if (rnd() < (ANON_RATE[i.source] ?? 0.1)) { await prisma.incident.update({ where: { id: i.id }, data: { anonymous: true, reporterId: null, agentReporterId: null, reporterName: null, reporterPhone: null, reporterEmail: null, reporterLga: null } }); anon++; continue; }
+      if ((i.source === 'call_centre' || i.source === 'ecc') && !i.reporterName) { await prisma.incident.update({ where: { id: i.id }, data: caller(i.lga, rnd) }); named++; }
+    }
+    console.log(`Seed: ${named} Call Centre/ECC callers named, ${anon} reports marked anonymous.`);
+  }
   if (!(await prisma.agentTask.count())) {
     const incs = await prisma.incident.findMany({ where: { status: { in: ['dispatched', 'acted', 'resolved'] } } });
     for (const i of incs) {
@@ -94,6 +115,33 @@ async function ensureBackfill() {
         await prisma.agentTask.update({ where: { id: t.id }, data: declined ? { status: 'declined' } : i.status === 'acted' ? { status: 'responded', respondedAt: resp } : { status: 'completed', respondedAt: resp, completedAt: i.resolvedAt || resp } });
       }
     }
+  }
+  // Chats: a few demo agent ↔ control-room conversations (once, demo data only). The newest agent replies stay unread.
+  if (!(await prisma.chatThread.count())) {
+    const admin = await prisma.adminUser.findFirst({ where: { role: 'superadmin' }, orderBy: { createdAt: 'asc' } });
+    const agents = await prisma.agent.findMany({ where: { status: 'active' }, orderBy: { createdAt: 'asc' }, take: 5 });
+    const SCRIPTS: [string, string][][] = [
+      [['admin', 'Good morning. Please confirm your team is on the Umuahia–Ikot Ekpene road checkpoint today.'], ['agent', 'Morning Control. Confirmed, three of us are on ground since 7am.'], ['admin', 'Thank you. Report anything unusual immediately.'], ['agent', 'Copy. Traffic is moving freely, no incident so far.'], ['agent', 'Two suspicious motorcyclists just passed towards Ubakala. Following up.']],
+      [['admin', 'We received a report of a robbery near Ariaria Market. Can you verify?'], ['agent', 'On my way, about 10 minutes out.'], ['agent', 'At the scene now. Shop owners say the boys escaped towards Faulks Road. No injuries.']],
+      [['agent', 'Control, there is a crowd building at Ohafia motor park over a land dispute.'], ['admin', 'Noted. Keep a safe distance and send updates every 15 minutes. Police have been alerted.'], ['agent', 'Crowd has dispersed. Elders are meeting the families.'], ['admin', 'Well done. Please file the full report when you can.']],
+      [['admin', 'Reminder: monthly verification exercise at the LGA secretariat on Friday by 10am.'], ['agent', 'Received with thanks.']],
+    ];
+    const now = Date.now();
+    for (let k = 0; k < Math.min(agents.length, SCRIPTS.length); k++) {
+      const a = agents[k]; const lines = SCRIPTS[k];
+      const t = await prisma.chatThread.create({ data: { publicId: opaqueId(), agentId: a.id } });
+      let at = now - (k * 5 + 2) * 3600000 - lines.length * 9 * 60000;
+      let last: { sender: string; body: string; at: Date } | null = null;
+      for (let j = 0; j < lines.length; j++) {
+        const [sender, body] = lines[j];
+        at += (4 + Math.floor(rnd() * 12)) * 60000;
+        const unreadTail = k < 2 && sender === 'agent' && j === lines.length - 1; // first two threads end with an unread agent message
+        await prisma.chatMessage.create({ data: { publicId: opaqueId(), threadId: t.id, sender, body, kind: 'text', adminId: sender === 'admin' ? admin?.id : null, adminName: sender === 'admin' ? admin?.name || 'Control Room' : null, readAt: unreadTail ? null : new Date(at + 60000), createdAt: new Date(at) } });
+        last = { sender, body, at: new Date(at) };
+      }
+      if (last) await prisma.chatThread.update({ where: { id: t.id }, data: { lastMessageAt: last.at, lastPreview: last.body.slice(0, 140), lastSender: last.sender } });
+    }
+    console.log(`Seed: ${Math.min(agents.length, SCRIPTS.length)} demo chat threads.`);
   }
 }
 
@@ -123,7 +171,11 @@ async function demo(email: string, passwordHash: string) {
     const cat = pick(cats); const lga = pick(LGAS); const r = rnd(); const created = ago(14); const [lat, lng] = pointIn(lga, rnd);
     const status = r < 0.12 ? 'new' : r < 0.32 ? 'dispatched' : r < 0.55 ? 'acted' : r < 0.95 ? 'resolved' : 'fake';
     incidents.push({ publicId: opaqueId(), category: cat.name, categoryId: cat.id, details: narrative(cat.name, lga, rnd), location: `${lga}, Abia, Nigeria`, lga, lat, lng, status,
-      ...((sr) => sr < 0.6 ? { source: 'user', reporterId: rnd() < 0.9 ? pick(allUsers).id : null } : sr < 0.82 ? { source: 'agent', agentReporterId: pick(allAgents.filter((a) => a.lga === lga).concat(allAgents)).id } : { source: sr < 0.93 ? 'call_centre' : 'ecc' })(rnd()), createdAt: created,
+      ...((sr) => {
+        const src = sr < 0.6 ? 'user' : sr < 0.82 ? 'agent' : sr < 0.93 ? 'call_centre' : 'ecc';
+        if (rnd() < ANON_RATE[src]) return { source: src, anonymous: true };
+        return src === 'user' ? { source: src, reporterId: pick(allUsers).id } : src === 'agent' ? { source: src, agentReporterId: pick(allAgents.filter((a) => a.lga === lga).concat(allAgents)).id } : { source: src, ...caller(lga, rnd) };
+      })(rnd()), createdAt: created,
       actedAt: ['acted', 'resolved'].includes(status) ? new Date(created.getTime() + rnd() * 6 * 3600000) : null,
       resolvedAt: ['resolved', 'fake'].includes(status) ? new Date(created.getTime() + (6 + rnd() * 40) * 3600000) : null, resolvedBy: ['resolved', 'fake'].includes(status) ? email : null,
       note: status === 'fake' ? 'Prank report — caller unreachable' : null });
@@ -157,7 +209,7 @@ async function main() {
   const password = process.env.SEED_ADMIN_PASSWORD || 'Passw0rd!23';
   const passwordHash = await bcrypt.hash(password, 10);
   if (process.env.SEED_RESET === 'true') {
-    await prisma.$transaction([prisma.agentTask.deleteMany(), prisma.incidentMedia.deleteMany(), prisma.dispatch.deleteMany(), prisma.incident.deleteMany(), prisma.alarm.deleteMany(), prisma.user.deleteMany(), prisma.agent.deleteMany(), prisma.notification.deleteMany(), prisma.securityAlert.deleteMany()]);
+    await prisma.$transaction([prisma.chatMessage.deleteMany(), prisma.chatThread.deleteMany(), prisma.agentTask.deleteMany(), prisma.incidentMedia.deleteMany(), prisma.dispatch.deleteMany(), prisma.incident.deleteMany(), prisma.alarm.deleteMany(), prisma.user.deleteMany(), prisma.agent.deleteMany(), prisma.notification.deleteMany(), prisma.securityAlert.deleteMany()]);
   }
   await ensureReference(email, passwordHash);
   if (process.env.SEED_DEMO !== 'false' && !(await prisma.user.count())) await demo(email, passwordHash);

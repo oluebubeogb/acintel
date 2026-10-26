@@ -5,6 +5,7 @@ import {
 import { PrismaService } from './prisma.service';
 import { AdminCtx, CurrentAdmin, Public, can } from './auth';
 import { narrative } from './incident-text';
+import { ANON_RATE, caller } from './reporters';
 import { opaqueId } from './util';
 import { Activity, Bus, Counts } from './realtime';
 import { LGAS, pointIn } from './geo';
@@ -37,7 +38,7 @@ export class HealthController {
 
 @Controller('prefs')
 export class PrefsController {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private act: Activity) {}
   @Get()
   async get(@CurrentAdmin() admin: AdminCtx) {
     const rows = await this.prisma.preference.findMany({ where: { OR: [{ scope: 'site' }, { scope: 'admin', adminId: admin.id }] } });
@@ -62,6 +63,8 @@ export class PrefsController {
       if (!Number.isFinite(n)) throw new BadRequestException('pollSeconds must be a number');
       values.pollSeconds = Math.min(120, Math.max(10, n)); // cap extremes so shared hosting / Coolify proxies are never hammered
     }
+    // On/off switches are stored as strict booleans ("false" strings would read as truthy in the browser).
+    for (const k of ['notifyNewUsers', 'notifyNewReports', 'notifyAlarms', 'notifySound', 'compactTables']) if (k in values) values[k] = values[k] === true || values[k] === 'true';
     for (const k of AI_FLAG_KEYS) if (k in values) {
       if (scope !== 'site') delete values[k]; // AI switches are site-wide only
       else values[k] = values[k] !== false && values[k] !== 'false';
@@ -72,7 +75,10 @@ export class PrefsController {
       if (existing) await this.prisma.preference.update({ where: { id: existing.id }, data: { value: value as any } });
       else await this.prisma.preference.create({ data: { scope, adminId, key, value: value as any } });
     }
+    // Settings → Sound On Alarm is the single source of truth: drop any stale per-admin sound override.
+    if (scope === 'site' && 'notifySound' in values) await this.prisma.preference.deleteMany({ where: { scope: 'admin', key: 'notifySound' } });
     if (scope === 'site') invalidateAiFlags();
+    this.act.changed(['prefs']); // other open tabs refetch prefs at once (e.g. sound switched off)
     return this.get(admin);
   }
 }
@@ -155,7 +161,10 @@ export class ActivitySimulator implements OnModuleInit, OnModuleDestroy {
       const reporter = source === 'user' ? await this.prisma.user.findFirst({ where: { status: 'active', lga }, skip: Math.floor(Math.random() * 5) }) : null;
       const agentRep = source === 'agent' ? await this.prisma.agent.findFirst({ where: { status: 'active', lga }, skip: Math.floor(Math.random() * 3) }) : null;
       const [lat, lng] = pointIn(lga);
-      const i = await this.prisma.incident.create({ data: { publicId: opaqueId(), category: cat.name, categoryId: cat.id, details: narrative(cat.name, lga), location: `${lga}, Abia, Nigeria`, lga, lat, lng, reporterId: reporter?.id, source: agentRep || source !== 'agent' ? source : 'user', agentReporterId: agentRep?.id } });
+      const src = agentRep || source !== 'agent' ? source : 'user';
+      const anonymous = Math.random() < (ANON_RATE[src] ?? 0.1) || (src === 'user' && !reporter);
+      const who = anonymous ? {} : src === 'call_centre' || src === 'ecc' ? caller(lga) : { reporterId: reporter?.id, agentReporterId: agentRep?.id };
+      const i = await this.prisma.incident.create({ data: { publicId: opaqueId(), category: cat.name, categoryId: cat.id, details: narrative(cat.name, lga), location: `${lga}, Abia, Nigeria`, lga, lat, lng, source: src, anonymous, ...who } });
       await this.act.notify('reports.new', 'report', `New report — ${cat.name}`, lga, `/e/${i.publicId}`);
       this.act.changed(['reports']);
     } else {

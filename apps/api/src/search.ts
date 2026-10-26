@@ -31,6 +31,8 @@ export const PAGES = [
   ['Notification feed', 'Alerts', '/alerts', 'alerts notifications activity'],
   ['Audit log', 'System', '/audit', 'audit history actions undo'],
   ['Settings', 'System', '/settings', 'preferences page size roles'],
+  ['Chats', 'System', '/chats', 'messages chat agents inbox dm direct message voice photo'],
+  ['AI Usage', 'System', '/settings/ai-usage', 'ai tokens usage cost calls model assist monitor'],
 ].map(([title, section, href, keywords]) => ({ title, section, href, keywords }));
 
 /** Must match the GIN trigram expression indexes in migration 20261025090000_phases_1_6 exactly. */

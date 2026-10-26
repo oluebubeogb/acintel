@@ -7,6 +7,8 @@ import { RecordsController } from './records';
 import { IncidentAiWorker } from './incident-text';
 import { SearchController } from './search';
 import { AiController } from './ai';
+import { AiUsageController, AiUsageService } from './ai-usage';
+import { ChatService, ChatsController } from './chats';
 import { Activity, Bus, Counts, StreamController } from './realtime';
 import {
   AdminsController, AgentsOpsController, AlarmsController, AuditController, CategoriesController, GroupsController,
@@ -15,10 +17,10 @@ import {
 
 @Module({
   controllers: [
-    HealthController, AuthController, PrefsController, NotificationsController, StreamController, RecordsController, SearchController, AiController,
+    HealthController, AuthController, PrefsController, NotificationsController, StreamController, RecordsController, SearchController, AiUsageController, AiController, ChatsController,
     UsersOpsController, AgentsOpsController, GroupsController, CategoriesController, AdminsController, IncidentsController, MediaController,
     AlarmsController, SecurityAlertsController, AuditController, ImportController,
   ],
-  providers: [PrismaService, Bus, Counts, Activity, RateLimiter, ActivitySimulator, IncidentAiWorker, { provide: APP_GUARD, useClass: SessionGuard }],
+  providers: [PrismaService, AiUsageService, ChatService, Bus, Counts, Activity, RateLimiter, ActivitySimulator, IncidentAiWorker, { provide: APP_GUARD, useClass: SessionGuard }],
 })
 export class AppModule {}

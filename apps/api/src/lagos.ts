@@ -3,7 +3,7 @@ export const LAGOS = 'Africa/Lagos';
 const OFFSET_MS = 60 * 60 * 1000;
 
 export const fmt = (d?: Date | null) => d ? new Intl.DateTimeFormat('en-GB', {
-  timeZone: LAGOS, weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true,
+  timeZone: LAGOS, weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h12',
 }).format(d) : '—';
 export const dayKey = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: LAGOS }).format(d);
 export const dayLabel = (d: Date) => new Intl.DateTimeFormat('en-GB', { timeZone: LAGOS, day: '2-digit', month: 'short' }).format(d);

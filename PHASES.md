@@ -160,3 +160,22 @@ _Status: Phases 0–6 are complete and verified locally on 25 Oct 2026. Phase 7 
   - has the master switch plus three feature switches, superadmin only;
   - shows a chip per feature: Running / Paused / Idle · No Keys / Off (Env).
 - **AcIntel Assist panel:** shows a "Paused" chip and a short paused notice instead of the usual intro.
+
+## UI polish 4 (batch 5 + steering 1–3)
+- **Migrations:** `20261026020000_reporter_details` (Call Centre / ECC caller + anonymous reporter fields), `20261026030000_ai_usage` (`AiUsage` log of every LLM call), `20261026040000_chats` (`ChatThread`, `ChatMessage`).
+- **Batch 5:** Homeland-leaning source colours; Call Centre / ECC callers and anonymous reports; view-only incident media; alert-sound fix; Reports › Analytics removed (Analytics lives under Dashboard); login tagline with hyphen plus animated stat icons; AI CSV answers no longer carry a "Download link".
+- **Steering 1:** AI chat sessions get 3–7 word titles (LLM when available, local rules otherwise) pushed live via SSE `ai.title`; Settings tooltips (`InfoTip`); superadmin **AI Usage** page at `/settings/ai-usage` (`GET /ai/usage`); Add Agent hints moved into label tooltips.
+- **Steering 2:** login footer "Sessions expire after 12 hours · times shown in Africa/Lagos" removed.
+- **Steering 3 — Nav:** Settings removed from the sidebar foot (top bar + user menu only). A **Chats** icon sits before the bell with a live unread badge (`counts.chats`), visible to `ops` roles.
+- **Steering 3 — Chats (agents ↔ control room):**
+  - One shared desk thread per agent (`ChatThread.agentId` unique). Desk = superadmin + controller (`ops` perm); group_admin has no access; agents do not message each other.
+  - Unread = agent messages the desk has not opened; opening or replying marks them read. Admin messages show **Seen** once the agents' app acks the feed.
+  - Attachments: photos (JPG/PNG/WebP/GIF/HEIC) and voice notes (WebM/OGG/MP3/M4A/AAC/WAV/3GP/AMR), stored in `UPLOAD_DIR/chats/<thread>/<message>.<ext>`, max `CHAT_MAX_UPLOAD_MB` (25). Served with Range support.
+  - Live: `chat.message` / `chat.read` on the Redis bus → SSE → `acintel:chat` window event; counts are pushed on every write.
+  - Web: `/chats` (list + thread, search over people and message text with highlighted snippets, All/Unread, New Message picker, Lagos day separators and times, image lightbox, voice player, MediaRecorder voice notes, paste-to-send photos, mobile single pane). Agent page has **Send Message**.
+  - Seed creates 4 demo threads when none exist; `SEED_RESET` clears chats.
+  - Routes (desk, `ops`): `GET /chats?q=&filter=unread`, `GET /chats/people?q=`, `POST /chats/start {agentId}`, `GET /chats/:id`, `POST /chats/:id/read`, `POST /chats/:id/messages {body}`, `POST /chats/:id/attachments` (multipart `file`, `body?`, `durationSec?`), `GET /chats/files/:messageId`.
+  - Routes (agents' app, public + `x-chat-key: $CHAT_INBOUND_KEY`, 404 when unset): `POST /chats/inbound` (`agent` = publicId / legacy id / phone, `body?`, `file?`), `GET /chats/agent-feed?agent=&since=&ack=1`, `GET /chats/agent-files/:messageId`.
+  - Env: `CHAT_INBOUND_KEY`, `CHAT_DEMO_REPLIES` (empty follows `SIMULATE_ACTIVITY`), `CHAT_MAX_UPLOAD_MB`.
+- Times: en-GB 12-hour formatting now uses `hourCycle: 'h12'` (fixes "00:43 pm").
+- Screenshots: `screenshots/polish4/01–25`.

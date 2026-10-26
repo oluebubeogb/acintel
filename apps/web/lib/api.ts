@@ -31,7 +31,7 @@ export function downloadCsv(name: string, columns: { key: string; label: string 
 export const LAGOS = 'Africa/Lagos';
 export const lagosStamp = () => new Intl.DateTimeFormat('en-CA', { timeZone: LAGOS }).format(new Date());
 export const lagosTime = (d: Date | string) => new Intl.DateTimeFormat('en-GB', {
-  timeZone: LAGOS, weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true,
+  timeZone: LAGOS, weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h12',
 }).format(new Date(d));
 export function timeAgo(d: string | Date) {
   const s = Math.max(1, Math.round((Date.now() - new Date(d).getTime()) / 1000));
